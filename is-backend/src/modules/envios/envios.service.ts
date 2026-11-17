@@ -19,7 +19,6 @@ import {
 import { AsignacionService } from '../asignacion/asignacion.service';
 import { ComerciosService } from '../comercios/comercios.service';
 import { generarCodigoSeguimiento } from './codigo-seguimiento.util';
-import { esEnvioDevueltoAlComercio } from './domain/deposito';
 import { ESTADOS_FINALES, esTransicionValida } from './domain/estado-envio';
 import { armarHistorial } from './domain/historial';
 import { ActualizarEnvioDto } from './dto/actualizar-envio.dto';
@@ -188,8 +187,7 @@ export class EnviosService {
   // cantidad. Los grupos salen del enum (no de una lista fija) para que un estado nuevo
   // aparezca solo. Cada envío viaja una única vez, dentro de su grupo.
   async obtenerPanel() {
-    const envios =
-      await this.enviosRepository.obtenerPanelEnvios(ESTADOS_FINALES);
+    const envios = await this.enviosRepository.obtenerPanelEnvios(ESTADOS_FINALES);
 
     const grupos = Object.values(EstadoEnvio)
       .filter((estado) => !ESTADOS_FINALES.includes(estado))
@@ -205,12 +203,6 @@ export class EnviosService {
     const envio = await this.enviosRepository.obtenerEstado(id);
     if (!envio) {
       throw new NotFoundException('El envío no existe');
-    }
-
-    // HU39 (Escenario 3): Un envío "Devuelto al comercio" ya está en un estado final y no
-    // puede cancelarse. Se verifica antes que el resto para devolver el mensaje exacto de la HU.
-    if (esEnvioDevueltoAlComercio(envio.estado, envio.eventos ?? [])) {
-      throw new ConflictException('El envío ya finalizó su ciclo');
     }
 
     if (!esTransicionValida(envio.estado, 'CANCELADO', 'OPERARIO')) {

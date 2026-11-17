@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, ErrorApi } from '../../../shared/api.ts'
 import { Boton, Campo, Modal } from '../../../shared/ui/index.ts'
-import { FormularioReingresoDeposito } from '../envios/DepositoDevolucionesSeccion.tsx'
 import type { Repartidor } from './tipos.ts'
 
 type Props = {
@@ -34,19 +33,19 @@ function AprobarCierreContenido({
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
 
-  const cargarRendicion = useCallback(() => {
+  useEffect(() => {
+    let activo = true
     api<{ paquetesADevolver: PaqueteADevolver[] }>(`/repartidores/${repartidor.id}/rendicion`)
       .then((datos) => {
-        setPaquetes(datos.paquetesADevolver)
+        if (activo) setPaquetes(datos.paquetesADevolver)
       })
       .catch((err: unknown) => {
-        setError(err instanceof ErrorApi ? err.message : 'Error de conexión')
+        if (activo) setError(err instanceof ErrorApi ? err.message : 'Error de conexión')
       })
+    return () => {
+      activo = false
+    }
   }, [repartidor.id])
-
-  useEffect(() => {
-    cargarRendicion()
-  }, [cargarRendicion])
 
   async function aprobar() {
     setEnviando(true)
@@ -110,12 +109,6 @@ function AprobarCierreContenido({
           />
         </div>
       )}
-
-      {/* HU37: Registrar el reingreso individual de cada paquete al depósito ("En custodia") */}
-      <FormularioReingresoDeposito
-        repartidorId={repartidor.id}
-        alReingresar={cargarRendicion}
-      />
 
       <div className="flex justify-end gap-3 pt-2">
         <Boton variante="secundario" onClick={onCerrar} disabled={enviando}>
