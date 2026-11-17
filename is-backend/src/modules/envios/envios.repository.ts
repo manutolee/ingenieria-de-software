@@ -210,7 +210,20 @@ export class EnviosRepository {
   async obtenerEstado(id: number) {
     return this.prisma.envio.findUnique({
       where: { id },
-      select: { id: true, estado: true },
+      select: {
+        id: true,
+        estado: true,
+        eventos: {
+          where: { tipo: 'DEVOLUCION' },
+          select: {
+            tipo: true,
+            estadoNuevo: true,
+            detalle: true,
+            creadoEn: true,
+          },
+          orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }],
+        },
+      },
     });
   }
 

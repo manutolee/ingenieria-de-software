@@ -12,6 +12,7 @@ type Viaje = {
   codigoSeguimiento: string
   estado: EstadoViaje
   siguienteEstado: EstadoEnvio | null
+  esDevolucion?: boolean
   comercio: { nombre: string; telefono: string }
   origenDireccion: string
   destinoDireccion: string
@@ -328,6 +329,33 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
     }
   }
 
+  // HU39: Confirmar en el comercio la devolución del paquete con foto obligatoria de la constancia.
+  async function confirmarDevolucion() {
+    if (!foto) {
+      // Escenario 2 de HU39: mantiene el estado y muestra el mensaje exacto.
+      setAviso('Falta la foto de la constancia')
+      return
+    }
+    setEnviando(true)
+    setAviso(null)
+    try {
+      await api('/repartidor/viajes/actual/confirmar-devolucion', {
+        metodo: 'POST',
+        datos: { foto },
+      })
+      setFoto('')
+      alEntregar()
+    } catch (error) {
+      setAviso(
+        error instanceof ErrorApi && (error.status === 400 || error.status === 409)
+          ? error.message
+          : 'No se pudo confirmar la devolución.',
+      )
+    } finally {
+      setEnviando(false)
+    }
+  }
+
   if (viaje === undefined) return null
 
   if (viaje === null) {
@@ -421,9 +449,25 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
         </dl>
       </details>
 
-      {aviso && <p className="rounded-xl bg-slate-800 p-4">{aviso}</p>}
+      {aviso && <p role="alert" className="rounded-xl bg-slate-800 p-4 font-semibold text-amber-300">{aviso}</p>}
 
-      {confirmando ? (
+      {viaje.esDevolucion ? (
+        <div className="space-y-4">
+          <EvidenciaEntrega
+            viaje={{ ...viaje, requiereFoto: true, requiereDni: false }}
+            dni=""
+            alCambiarDni={() => undefined}
+            foto={foto}
+            alCambiarFoto={(nuevaFoto) => {
+              setFoto(nuevaFoto)
+              setAviso(null)
+            }}
+          />
+          <BotonGrande onClick={() => void confirmarDevolucion()} disabled={enviando}>
+            {enviando ? 'Confirmando…' : 'Confirmar devolución'}
+          </BotonGrande>
+        </div>
+      ) : confirmando ? (
         <div className="space-y-3 rounded-xl border border-yellow-400/40 p-4">
           <p className="text-center text-lg font-semibold">¿Confirmás «{accion}»?</p>
           <BotonGrande onClick={() => void avanzar()} disabled={enviando}>

@@ -7,6 +7,7 @@ import { EtiquetaEstado } from '../../../shared/ui/EtiquetaEstado'
 import { Campo } from '../../../shared/ui/Campo'
 import { Tabla } from '../../../shared/ui/Tabla'
 import { usePolling } from '../../../shared/usePolling'
+import { DepositoDevolucionesSeccion } from './DepositoDevolucionesSeccion'
 import { AVISO_EXCEPCION, esAsignacionPorExcepcion } from './excepcion.ts'
 
 interface ComercioOpcion {
@@ -335,6 +336,12 @@ export function EnviosPage() {
           />
         )}
       </div>
+
+      {/* HU38 y HU40: Alertas de devoluciones pendientes (>= 24 h) y órdenes de devolución al comercio */}
+      <DepositoDevolucionesSeccion
+        comercios={comercios}
+        alActualizarEnvios={() => void cargarEnvios()}
+      />
     </div>
   )
 }
