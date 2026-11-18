@@ -83,9 +83,9 @@ export class ComerciosService {
       comercioNombre: comercio.nombre,
       fecha,
       entregados: porEstado.get('ENTREGADO') ?? 0,
-      devueltos:
-        (porEstado.get('DEVUELTO_AL_COMERCIO') ?? 0) +
-        (porEstado.get('DEVUELTO') ?? 0),
+      // Hoy no hay estado "devuelto al comercio" (HU 39): da 0 hasta que se agregue al enum y a
+      // ESTADOS_FINALES. Ojo: el evento DEVOLUCION es otra cosa (paquete vuelto a la base).
+      devueltos: porEstado.get('DEVUELTO_AL_COMERCIO') ?? 0,
       cancelados: porEstado.get('CANCELADO') ?? 0,
     };
   }

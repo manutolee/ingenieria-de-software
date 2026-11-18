@@ -94,38 +94,10 @@ export class ComerciosRepository {
       _count: { _all: true },
     });
 
-    const resultado = grupos.map((grupo) => ({
+    return grupos.map((grupo) => ({
       estado: grupo.estado,
       cantidad: grupo._count._all,
     }));
-
-    // GUÍA DE INGENIERÍA INVERSA (HU39 + HU41):
-    // Mientras `DEVUELTO_AL_COMERCIO` no figure todavía en el enum `EstadoEnvio` de `schema.prisma`,
-    // los envíos devueltos al comercio se registran con un `EventoEnvio` (`tipo = 'DEVOLUCION'`,
-    // `detalle = 'Devuelto al comercio'`). Los contamos acá para que el resumen diario (HU41)
-    // refleje los devueltos hoy mismo; cuando Salvador agregue `DEVUELTO_AL_COMERCIO` a
-    // `ESTADOS_FINALES`, entrarán directo por el `groupBy` de arriba.
-    if (!estadosFinales.includes('DEVUELTO_AL_COMERCIO' as EstadoEnvio)) {
-      const devueltos = await this.prisma.envio.count({
-        where: {
-          comercioId,
-          eventos: {
-            some: {
-              detalle: 'Devuelto al comercio',
-              creadoEn: { gte: desde, lte: hasta },
-            },
-          },
-        },
-      });
-      if (devueltos > 0) {
-        resultado.push({
-          estado: 'DEVUELTO_AL_COMERCIO' as EstadoEnvio,
-          cantidad: devueltos,
-        });
-      }
-    }
-
-    return resultado;
   }
 
   // 💥 BAJA LÓGICA (NO BORRAR REGISTRO DE BD)
