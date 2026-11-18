@@ -42,6 +42,10 @@ export class EnviosRepository {
     comercioId: number;
     origenDireccion: string;
     destinoDireccion: string;
+    origenLat?: number;
+    origenLon?: number;
+    destinoLat?: number;
+    destinoLon?: number;
     destinatarioNombre: string;
     destinatarioApellido: string;
     destinatarioDni?: string;
@@ -59,6 +63,10 @@ export class EnviosRepository {
           comercioId: data.comercioId,
           origenDireccion: data.origenDireccion,
           destinoDireccion: data.destinoDireccion,
+          origenLat: data.origenLat,
+          origenLon: data.origenLon,
+          destinoLat: data.destinoLat,
+          destinoLon: data.destinoLon,
           destinatarioNombre: data.destinatarioNombre,
           destinatarioApellido: data.destinatarioApellido,
           destinatarioDni: data.destinatarioDni,
@@ -318,6 +326,8 @@ export class EnviosRepository {
         tamanio: true,
         vehiculoRequerido: true,
         destinoDireccion: true,
+        destinoLat: true,
+        destinoLon: true,
         destinatarioNombre: true,
         destinatarioApellido: true,
         destinatarioDni: true,
@@ -334,6 +344,8 @@ export class EnviosRepository {
     estadoEsperado: EstadoEnvio,
     datos: {
       destinoDireccion?: string;
+      destinoLat?: number | null;
+      destinoLon?: number | null;
       destinatarioNombre?: string;
       destinatarioApellido?: string;
       destinatarioDni?: string | null;
@@ -380,6 +392,10 @@ export class EnviosRepository {
       const dataUpdate: Prisma.EnvioUpdateInput = {};
       if (datos.destinoDireccion !== undefined)
         dataUpdate.destinoDireccion = datos.destinoDireccion;
+      if (datos.destinoLat !== undefined)
+        dataUpdate.destinoLat = datos.destinoLat;
+      if (datos.destinoLon !== undefined)
+        dataUpdate.destinoLon = datos.destinoLon;
       if (datos.destinatarioNombre !== undefined)
         dataUpdate.destinatarioNombre = datos.destinatarioNombre;
       if (datos.destinatarioApellido !== undefined)
