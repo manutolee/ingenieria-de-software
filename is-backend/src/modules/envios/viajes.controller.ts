@@ -5,6 +5,7 @@ import {
   type UsuarioAutenticado,
 } from '../../common/auth';
 import { AvanzarViajeDto } from './dto/avanzar-viaje.dto';
+import { ConfirmarDevolucionDto } from './dto/confirmar-devolucion.dto';
 import { ReportarIncidenteDto } from './dto/reportar-incidente.dto';
 import { ViajesService } from './viajes.service';
 
@@ -34,6 +35,16 @@ export class ViajesController {
     @Body() evidencia: AvanzarViajeDto,
   ) {
     return this.viajesService.avanzarViajeActual(usuario.id, evidencia);
+  }
+
+  // HU39: Confirmar en el comercio la entrega de un paquete devuelto, exigiendo la foto de la constancia.
+  @Post('actual/confirmar-devolucion')
+  @HttpCode(200)
+  confirmarDevolucion(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: ConfirmarDevolucionDto,
+  ) {
+    return this.viajesService.confirmarDevolucionActual(usuario.id, dto);
   }
 
   @Post('actual/incidente')

@@ -2,11 +2,15 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Optional,
 } from '@nestjs/common';
 import { AsignacionService } from '../asignacion/asignacion.service';
+import { DepositoRepository } from './deposito.repository';
 import { inicioDelDia } from './domain/dia';
+import { obtenerEtapaDeposito } from './domain/deposito';
 import { esTransicionValida, siguienteEstado } from './domain/estado-envio';
 import { AvanzarViajeDto } from './dto/avanzar-viaje.dto';
+import { ConfirmarDevolucionDto } from './dto/confirmar-devolucion.dto';
 import { ReportarIncidenteDto } from './dto/reportar-incidente.dto';
 import { EnviosRepository } from './envios.repository';
 
@@ -25,12 +29,53 @@ export class ViajesService {
   constructor(
     private readonly enviosRepository: EnviosRepository,
     private readonly asignacionService: AsignacionService,
+    @Optional() private readonly depositoRepository?: DepositoRepository,
   ) {}
 
   async obtenerViajeActual(repartidorId: number) {
     const envio =
       await this.enviosRepository.buscarViajeActivoPorRepartidor(repartidorId);
-    if (!envio) return { viaje: null };
+    if (!envio) {
+      // HU39: Si no tiene un viaje de entrega común, verificamos si tiene asignada una
+      // devolución hacia el comercio de origen ("En devolución").
+      const devolucion =
+        await this.depositoRepository?.buscarEnvioEnDevolucionPorRepartidor(
+          repartidorId,
+        );
+      if (
+        devolucion &&
+        obtenerEtapaDeposito(devolucion.estado, devolucion.eventos) ===
+          'EN_DEVOLUCION'
+      ) {
+        return {
+          viaje: {
+            envioId: devolucion.id,
+            codigoSeguimiento: devolucion.codigoSeguimiento,
+            estado: devolucion.estado,
+            siguienteEstado: null,
+            esDevolucion: true,
+            comercio: {
+              nombre: devolucion.comercio.nombre,
+              telefono: '',
+            },
+            origenDireccion: 'Depósito central',
+            destinoDireccion: devolucion.comercio.direccion,
+            origen: null,
+            destino: punto(devolucion.origenLat, devolucion.origenLon),
+            destinatario: {
+              nombre: devolucion.comercio.nombre,
+              apellido: null,
+              telefono: null,
+            },
+            observaciones: 'Devolución de paquete al comercio de origen',
+            requiereFoto: true,
+            requiereDni: false,
+            aviso: null,
+          },
+        };
+      }
+      return { viaje: null };
+    }
 
     // Si el operario cambió la dirección con el viaje en curso (HU 31), se le avisa.
     const aviso =
@@ -133,6 +178,56 @@ export class ViajesService {
       await this.asignacionService.reintentarPendientes();
     }
     return { estado: nuevo, siguienteEstado: siguienteEstado(nuevo) };
+  }
+
+  // HU39: Confirmar la devolución de un paquete en el comercio de origen.
+  // Reglas:
+  // 1. Exige siempre la foto de la constancia de recepción del comercio (Escenario 2).
+  // 2. Cambia el envío al estado final "Devuelto al comercio", registra el evento para
+  //    avisar al operario y libera al repartidor en la cola FIFO (Escenario 1).
+  async confirmarDevolucionActual(
+    repartidorId: number,
+    dto: ConfirmarDevolucionDto = {},
+  ) {
+    // Escenario 2: Confirmación fallida sin constancia.
+    if (!dto.foto || !dto.foto.trim()) {
+      throw new BadRequestException('Falta la foto de la constancia');
+    }
+
+    if (!this.depositoRepository) {
+      throw new ConflictException(
+        'No tenés ninguna devolución activa para confirmar',
+      );
+    }
+
+    const envio =
+      await this.depositoRepository.buscarEnvioEnDevolucionPorRepartidor(
+        repartidorId,
+      );
+    if (
+      !envio ||
+      obtenerEtapaDeposito(envio.estado, envio.eventos) !== 'EN_DEVOLUCION'
+    ) {
+      throw new ConflictException(
+        'No tenés ninguna devolución activa para confirmar',
+      );
+    }
+
+    await this.depositoRepository.confirmarDevolucionAlComercio(
+      envio.id,
+      repartidorId,
+      dto.foto,
+    );
+
+    // El repartidor terminó el viaje de devolución y volvió al final de la cola FIFO.
+    await this.asignacionService.reintentarPendientes();
+
+    return {
+      envioId: envio.id,
+      codigoSeguimiento: envio.codigoSeguimiento,
+      estado: 'DEVUELTO_AL_COMERCIO' as const,
+      avisoOperario: `Devolución confirmada en ${envio.comercio.nombre}`,
+    };
   }
 
   async reportarIncidente(repartidorId: number, dto: ReportarIncidenteDto) {
