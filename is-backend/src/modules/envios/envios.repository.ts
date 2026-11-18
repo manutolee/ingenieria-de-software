@@ -295,7 +295,14 @@ export class EnviosRepository {
         data: {
           estado: 'INTERRUMPIDO',
           repartidorId: null,
-          ...(paqueteRetirado && { origenDireccion: ubicacionActual }),
+          // La dirección escrita a mano invalida el punto del mapa y la duración ya calculados
+          // (HU 70): se vuelven a resolver desde la nueva ubicación.
+          ...(paqueteRetirado && {
+            origenDireccion: ubicacionActual,
+            origenLat: null,
+            origenLon: null,
+            duracionEstimadaMin: null,
+          }),
         },
       });
       await tx.repartidor.update({

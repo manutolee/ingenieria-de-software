@@ -37,6 +37,9 @@ describe('EnviosRepository.reportarIncidente', () => {
         estado: 'INTERRUMPIDO',
         repartidorId: null,
         origenDireccion: 'Calle 50 123',
+        origenLat: null,
+        origenLon: null,
+        duracionEstimadaMin: null,
       },
     });
     expect(tx.repartidor.update).toHaveBeenCalledWith({
