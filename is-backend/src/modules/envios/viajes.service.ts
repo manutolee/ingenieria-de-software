@@ -11,6 +11,7 @@ import { obtenerEtapaDeposito } from './domain/deposito';
 import { esTransicionValida, siguienteEstado } from './domain/estado-envio';
 import { AvanzarViajeDto } from './dto/avanzar-viaje.dto';
 import { ConfirmarDevolucionDto } from './dto/confirmar-devolucion.dto';
+import { ReportarIncidenteDto } from './dto/reportar-incidente.dto';
 import { EnviosRepository } from './envios.repository';
 
 const punto = (lat: number | null, lon: number | null) =>
@@ -226,6 +227,46 @@ export class ViajesService {
       codigoSeguimiento: envio.codigoSeguimiento,
       estado: 'DEVUELTO_AL_COMERCIO' as const,
       avisoOperario: `Devolución confirmada en ${envio.comercio.nombre}`,
+    };
+  }
+
+  async reportarIncidente(repartidorId: number, dto: ReportarIncidenteDto) {
+    const envio =
+      await this.enviosRepository.buscarViajeActivoPorRepartidor(repartidorId);
+    if (
+      !envio ||
+      !esTransicionValida(envio.estado, 'INTERRUMPIDO', 'REPARTIDOR')
+    ) {
+      throw new ConflictException(
+        'No tenés un viaje activo para reportar un incidente',
+      );
+    }
+
+    const paqueteRetirado =
+      envio.estado === 'RETIRADO' || envio.estado === 'EN_DOMICILIO';
+    const ubicacion = dto.ubicacion?.trim();
+    if (paqueteRetirado && (!ubicacion || ubicacion.length < 3)) {
+      throw new BadRequestException(
+        'Ingresá la ubicación actual para reasignar el paquete',
+      );
+    }
+    const interrumpido = await this.enviosRepository.reportarIncidente(
+      repartidorId,
+      ubicacion,
+    );
+    if (!interrumpido) {
+      throw new ConflictException(
+        'El viaje cambió mientras reportabas el incidente. Actualizá la pantalla e intentá de nuevo.',
+      );
+    }
+
+    const oferta = await this.asignacionService.asignar(interrumpido.envioId);
+    return {
+      estado: 'INTERRUMPIDO' as const,
+      estadoEnvio: oferta ? ('PENDIENTE' as const) : ('PARADO' as const),
+      mensaje: oferta
+        ? 'Incidente reportado. El envío se ofreció a otro repartidor.'
+        : 'Incidente reportado. No hay repartidores compatibles; el envío quedó parado.',
     };
   }
 
