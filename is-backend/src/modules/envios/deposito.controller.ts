@@ -28,6 +28,13 @@ import { ReingresoDepositoDto } from './dto/reingreso-deposito.dto';
 export class DepositoController {
   constructor(private readonly depositoService: DepositoService) {}
 
+  // Pestaña Depósito: paquetes en custodia por comercio y órdenes de devolución.
+  // Con subruta: GET /envios/deposito chocaría con GET /envios/:id.
+  @Get('resumen')
+  async resumen() {
+    return this.depositoService.resumen();
+  }
+
   // HU37: Registrar el reingreso de un paquete no entregado al depósito.
   @Post('reingreso')
   @HttpCode(HttpStatus.OK)

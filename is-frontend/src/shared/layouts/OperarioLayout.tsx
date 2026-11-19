@@ -8,6 +8,7 @@ const SECCIONES = [
   { ruta: '/operario/repartidores', nombre: 'Repartidores' },
   { ruta: '/operario/flota', nombre: 'Flota' },
   { ruta: '/operario/excepciones', nombre: 'Excepciones' },
+  { ruta: '/operario/deposito', nombre: 'Depósito' },
 ]
 
 // Estructura del panel del operario: menú a la izquierda (arriba en pantallas chicas) y la página a la derecha.

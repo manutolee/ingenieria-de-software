@@ -196,6 +196,30 @@ export class EnviosRepository {
           },
         },
         eventos: { orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }] },
+        // Orden de devolución en la que viaja (HU 38), con los demás paquetes y sus ofertas:
+        // la orden se ofrece a través de su primer paquete, pero vale para todos.
+        ordenDevolucion: {
+          select: {
+            id: true,
+            creadaEn: true,
+            confirmadaEn: true,
+            envios: {
+              orderBy: { id: 'asc' },
+              select: {
+                id: true,
+                codigoSeguimiento: true,
+                ofertas: {
+                  orderBy: { creadaEn: 'asc' },
+                  include: {
+                    repartidor: {
+                      select: { id: true, nombre: true, apellido: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
   }

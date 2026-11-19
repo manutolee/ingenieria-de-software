@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ErrorApi } from '../../../shared/api.ts'
 import { Boton, Modal } from '../../../shared/ui/index.ts'
-import { FormularioReingresoDeposito } from '../envios/DepositoDevolucionesSeccion.tsx'
+import { FormularioReingresoDeposito } from '../deposito/FormularioReingresoDeposito.tsx'
 import type { Repartidor } from './tipos.ts'
 
 type Props = {

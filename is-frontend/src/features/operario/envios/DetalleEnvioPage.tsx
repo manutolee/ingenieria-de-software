@@ -1,5 +1,5 @@
 import { useCallback, useState, type FormEvent } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { api, ErrorApi } from '../../../shared/api.ts'
 import {
   ETIQUETA_ESTADO_ENVIO,
@@ -44,6 +44,12 @@ interface DetalleEnvio {
   requiereFoto: boolean
   requiereDni: boolean
   reintentoPendiente: boolean
+  // Orden de devolución en la que viaja de vuelta al comercio (HU 38).
+  ordenDevolucion: {
+    id: number
+    confirmadaEn: string | null
+    paquetes: { envioId: number; codigoSeguimiento: string }[]
+  } | null
   fotoUrl?: string | null
   observaciones: string | null
   comercio: { nombre: string }
@@ -443,6 +449,31 @@ export function DetalleEnvioPage() {
           </div>
         )}
       </dl>
+
+      {envio.ordenDevolucion && (
+        <p className="rounded-lg border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900">
+          {envio.ordenDevolucion.confirmadaEn ? 'Volvió' : 'Vuelve'} al comercio en la{' '}
+          <Link to="/operario/deposito" className="font-semibold underline">
+            orden de devolución #{envio.ordenDevolucion.id}
+          </Link>
+          {envio.ordenDevolucion.paquetes.length > 1 && (
+            <>
+              {' '}junto con{' '}
+              {envio.ordenDevolucion.paquetes
+                .filter((p) => p.envioId !== envio.id)
+                .map((p, i) => (
+                  <span key={p.envioId}>
+                    {i > 0 && ', '}
+                    <Link to={`/operario/envios/${p.envioId}`} className="font-mono font-semibold underline">
+                      {p.codigoSeguimiento}
+                    </Link>
+                  </span>
+                ))}
+            </>
+          )}
+          .
+        </p>
+      )}
 
       <section className="rounded-lg border border-gray-200 bg-white p-6">
         <h2 className="mb-4 text-lg font-semibold">Historial</h2>

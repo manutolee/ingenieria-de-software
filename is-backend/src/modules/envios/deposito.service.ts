@@ -11,6 +11,7 @@ import {
   calcularHorasEnCustodia,
   requiereAlertaDemoraCustodia,
 } from './domain/deposito';
+import { inicioDelDia } from './domain/dia';
 import { esTransicionValida } from './domain/estado-envio';
 import type { CrearOrdenDevolucionDto } from './dto/crear-orden-devolucion.dto';
 import type { ReingresoDepositoDto } from './dto/reingreso-deposito.dto';
@@ -74,6 +75,81 @@ export class DepositoService {
       estado: 'EN_CUSTODIA' as const,
       comercio: envio.comercio,
       ...reingreso,
+    };
+  }
+
+  // Pestaña Depósito del operario: todo el circuito en una sola consulta.
+  // - custodia: los paquetes en la base agrupados por comercio, listos para armar la orden
+  //   (HU 38), con la alerta de 24 horas marcada en cada uno (HU 40).
+  // - ordenes: las de devolución abiertas y las que se confirmaron hoy, con su estado.
+  async resumen(ahora: Date = new Date()) {
+    const [enCustodia, ordenes] = await Promise.all([
+      this.depositoRepository.listarEnCustodia(),
+      this.depositoRepository.listarOrdenes(inicioDelDia(ahora)),
+    ]);
+
+    const porComercio = new Map<
+      number,
+      {
+        comercio: { id: number; nombre: string; direccion: string };
+        paquetes: {
+          envioId: number;
+          codigoSeguimiento: string;
+          destinoOriginal: string;
+          tamanio: string;
+          fechaReingreso: Date;
+          horasEnCustodia: number;
+          alerta: boolean;
+        }[];
+      }
+    >();
+    for (const envio of enCustodia) {
+      const fechaReingreso = fechaDeReingreso(envio);
+      const grupo = porComercio.get(envio.comercio.id) ?? {
+        comercio: envio.comercio,
+        paquetes: [],
+      };
+      grupo.paquetes.push({
+        envioId: envio.id,
+        codigoSeguimiento: envio.codigoSeguimiento,
+        destinoOriginal: envio.destinoDireccion,
+        tamanio: envio.tamanio,
+        fechaReingreso,
+        horasEnCustodia: calcularHorasEnCustodia(fechaReingreso, ahora),
+        alerta: requiereAlertaDemoraCustodia(fechaReingreso, ahora),
+      });
+      porComercio.set(envio.comercio.id, grupo);
+    }
+
+    return {
+      custodia: [...porComercio.values()].sort((a, b) =>
+        a.comercio.nombre.localeCompare(b.comercio.nombre),
+      ),
+      ordenes: ordenes.map((orden) => {
+        const ofertada = orden.envios
+          .flatMap((envio) => envio.ofertas)
+          .at(0)?.repartidor;
+        const estado = orden.confirmadaEn
+          ? ('DEVUELTA' as const)
+          : orden.repartidor
+            ? ('EN_CAMINO' as const)
+            : ofertada
+              ? ('OFRECIDA' as const)
+              : ('SIN_REPARTIDOR' as const);
+        const quien = orden.repartidor ?? ofertada;
+        return {
+          ordenId: orden.id,
+          estado,
+          comercio: orden.comercio,
+          repartidor: quien ? `${quien.nombre} ${quien.apellido}` : null,
+          creadaEn: orden.creadaEn,
+          confirmadaEn: orden.confirmadaEn,
+          paquetes: orden.envios.map((envio) => ({
+            envioId: envio.id,
+            codigoSeguimiento: envio.codigoSeguimiento,
+          })),
+        };
+      }),
     };
   }
 
