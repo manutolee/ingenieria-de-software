@@ -82,6 +82,13 @@ function responsable(entrada: EntradaHistorial): string {
 
 // Antes de que el repartidor retire el paquete (HU 31).
 const ESTADOS_MODIFICABLES: EstadoEnvio[] = ['PENDIENTE', 'ASIGNADO', 'EN_CAMINO_A_RETIRAR']
+const ESTADOS_CON_ACCION_CANCELAR: EstadoEnvio[] = [
+  'PENDIENTE',
+  'ASIGNADO',
+  'EN_CAMINO_A_RETIRAR',
+  'RETIRADO',
+  'EN_DOMICILIO',
+]
 
 export function DetalleEnvioPage() {
   const { id } = useParams()
@@ -232,7 +239,7 @@ export function DetalleEnvioPage() {
   }
 
   const destinatario = [envio.destinatarioNombre, envio.destinatarioApellido].filter(Boolean).join(' ')
-  const sePuedeCancelar = envio.estado !== 'ENTREGADO' && envio.estado !== 'CANCELADO'
+  const sePuedeCancelar = ESTADOS_CON_ACCION_CANCELAR.includes(envio.estado)
   const fotoEntrega = envio.fotoUrl && FOTO_DATA_URI.test(envio.fotoUrl) ? envio.fotoUrl : null
 
   return (
@@ -441,7 +448,7 @@ export function DetalleEnvioPage() {
         titulo="¿Cancelar este envío?"
       >
         <p className="mb-4 text-sm text-gray-600">
-          No se puede deshacer. Si ya tenía repartidor, queda libre para otro viaje.
+          Solo se puede cancelar antes del retiro. Si el paquete ya fue retirado, corresponde gestionarlo como devolución.
         </p>
         {errorCancelacion && <p className="mb-4 text-sm text-red-600">{errorCancelacion}</p>}
         <div className="flex justify-end gap-2">

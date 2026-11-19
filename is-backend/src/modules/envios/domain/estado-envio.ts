@@ -26,6 +26,12 @@ const ESTADOS_VIAJE_INTERRUMPIBLES: readonly EstadoEnvio[] = [
   'EN_DOMICILIO',
 ];
 
+const ESTADOS_CANCELABLES: readonly EstadoEnvio[] = [
+  'PENDIENTE',
+  'ASIGNADO',
+  'EN_CAMINO_A_RETIRAR',
+];
+
 export function esTransicionValida(
   estadoActual: EstadoEnvio,
   estadoDestino: EstadoEnvio,
@@ -34,11 +40,7 @@ export function esTransicionValida(
   // El operario no avanza el viaje (lo hace quien tiene el paquete): solo puede cancelarlo,
   // y nunca después de que terminó.
   if (estadoDestino === 'CANCELADO') {
-    return (
-      actor === 'OPERARIO' &&
-      estadoActual !== 'ENTREGADO' &&
-      estadoActual !== 'CANCELADO'
-    );
+    return actor === 'OPERARIO' && ESTADOS_CANCELABLES.includes(estadoActual);
   }
   if (actor === 'REPARTIDOR' && estadoDestino === 'INTERRUMPIDO') {
     return ESTADOS_VIAJE_INTERRUMPIBLES.includes(estadoActual);

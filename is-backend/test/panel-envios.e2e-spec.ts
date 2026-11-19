@@ -155,8 +155,7 @@ describe('Panel de envíos del día - HU #4 (e2e)', () => {
   });
 
   describe('Escenario 1: Panel con envíos en distintos estados', () => {
-    // El destacado de "Con novedad" e "Interrumpido" depende solo del estado del envío. Esos
-    // estados todavía no existen en el enum: se prueba cuando los agreguen sus historias.
+    // Los estados que todavía no tienen envíos también aparecen como grupos vacíos.
     it('agrupa los envíos por estado con la cantidad de cada grupo', async () => {
       await crearEnvio({ estado: 'PENDIENTE' });
       await crearEnvio({ estado: 'PENDIENTE' });
@@ -177,6 +176,8 @@ describe('Panel de envíos del día - HU #4 (e2e)', () => {
         { estado: 'EN_DOMICILIO', cantidad: 0 },
         { estado: 'INTERRUMPIDO', cantidad: 0 },
         { estado: 'PARADO', cantidad: 0 },
+        { estado: 'CON_NOVEDAD', cantidad: 0 },
+        { estado: 'A_DEVOLVER', cantidad: 0 },
       ]);
       expect(grupoDe(panel, 'PENDIENTE').envios).toHaveLength(3);
       expect(grupoDe(panel, 'EN_CAMINO_A_RETIRAR').envios).toHaveLength(2);
