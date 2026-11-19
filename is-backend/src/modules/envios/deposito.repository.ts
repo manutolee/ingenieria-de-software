@@ -105,6 +105,39 @@ export class DepositoRepository {
     });
   }
 
+  // Órdenes de devolución para la pestaña Depósito: las que siguen abiertas y las que se
+  // confirmaron desde `confirmadasDesde` (las del día), con sus paquetes y la oferta en curso.
+  listarOrdenes(confirmadasDesde: Date) {
+    return this.prisma.ordenDevolucion.findMany({
+      where: {
+        OR: [
+          { confirmadaEn: null },
+          { confirmadaEn: { gte: confirmadasDesde } },
+        ],
+      },
+      orderBy: [{ creadaEn: 'desc' }, { id: 'desc' }],
+      select: {
+        id: true,
+        creadaEn: true,
+        confirmadaEn: true,
+        comercio: { select: { nombre: true, direccion: true } },
+        repartidor: { select: { nombre: true, apellido: true } },
+        envios: {
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            codigoSeguimiento: true,
+            estado: true,
+            ofertas: {
+              where: { estado: 'PENDIENTE' },
+              select: { repartidor: { select: { nombre: true, apellido: true } } },
+            },
+          },
+        },
+      },
+    });
+  }
+
   // HU 38: arma la orden con paquetes en custodia de un comercio y los pasa a "En devolución".
   // Devuelve null si alguno ya no está en custodia (otro operario lo incluyó en otra orden).
   crearOrdenDevolucion(

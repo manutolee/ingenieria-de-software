@@ -185,6 +185,11 @@ describe('EnviosService', () => {
   });
 
   describe('listar (B-4)', () => {
+    it('pasa el orden pedido: actividad para ver primero lo último que terminó', async () => {
+      await service.listar({ estado: ['ENTREGADO'], orden: 'actividad' });
+      expect(filtrosAlRepository()).toMatchObject({ orden: 'actividad' });
+    });
+
     it('sin filtros usa la página 1 con 20 resultados', async () => {
       const respuesta = await service.listar({});
       expect(filtrosAlRepository()).toMatchObject({ saltar: 0, tomar: 20 });

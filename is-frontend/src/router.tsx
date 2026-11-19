@@ -7,6 +7,7 @@ import { UiDemoPage } from './features/dev/UiDemoPage.tsx'
 import { InicioPage } from './features/inicio/InicioPage.tsx'
 import { NoEncontradoPage } from './features/inicio/NoEncontradoPage.tsx'
 import { ComerciosPage } from './features/operario/comercios/ComerciosPage.tsx'
+import { DepositoPage } from './features/operario/deposito/DepositoPage.tsx'
 import { DetalleEnvioPage } from './features/operario/envios/DetalleEnvioPage.tsx'
 import { EnviosPage } from './features/operario/envios/EnviosPage.tsx'
 import { NuevoEnvioPage } from './features/operario/envios/NuevoEnvioPage.tsx'
@@ -46,6 +47,7 @@ const rutas: RouteObject[] = [
       { path: 'repartidores', element: <RepartidoresPage /> },
       { path: 'flota', element: <FlotaPage /> },
       { path: 'excepciones', element: <ExcepcionesPage /> },
+      { path: 'deposito', element: <DepositoPage /> },
     ],
   },
 

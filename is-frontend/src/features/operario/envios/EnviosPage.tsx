@@ -7,7 +7,6 @@ import { EtiquetaEstado } from '../../../shared/ui/EtiquetaEstado'
 import { Campo } from '../../../shared/ui/Campo'
 import { Tabla } from '../../../shared/ui/Tabla'
 import { usePolling } from '../../../shared/usePolling'
-import { DepositoDevolucionesSeccion } from './DepositoDevolucionesSeccion'
 import { AVISO_EXCEPCION, esAsignacionPorExcepcion } from './excepcion.ts'
 
 interface ComercioOpcion {
@@ -49,6 +48,9 @@ const FILTROS_VACIOS: FiltrosEnvios = {
   fecha: '',
 }
 
+// Cuántos envíos trae cada consulta. Si hay más, se avisa para que el operario filtre.
+const LIMITE = 50
+
 const PESTANAS: { id: Pestana; etiqueta: string }[] = [
   { id: 'PENDIENTE', etiqueta: 'Pendientes de asignar' },
   { id: 'EN_CURSO', etiqueta: 'En curso' },
@@ -58,6 +60,7 @@ const PESTANAS: { id: Pestana; etiqueta: string }[] = [
 export function EnviosPage() {
   const navigate = useNavigate()
   const [envios, setEnvios] = useState<EnvioResumen[]>([])
+  const [total, setTotal] = useState(0)
   const [comercios, setComercios] = useState<ComercioOpcion[]>([])
   const [filtros, setFiltros] = useState<FiltrosEnvios>(FILTROS_VACIOS)
   const [filtrosAplicados, setFiltrosAplicados] = useState<FiltrosEnvios | null>(null)
@@ -98,11 +101,16 @@ export function EnviosPage() {
         }
       } else {
         parametros.set('estado', filtros[pestanaActiva])
+        // En curso y finalizados: arriba lo que se movió último (por ejemplo, lo que terminó
+        // recién), no lo último que se registró.
+        if (pestanaActiva !== 'PENDIENTE') parametros.set('orden', 'actividad')
       }
+      parametros.set('limite', String(LIMITE))
 
       const respuesta = await api<RespuestaPaginada>(`/envios?${parametros.toString()}`)
 
       setEnvios(Array.isArray(respuesta?.datos) ? respuesta.datos : [])
+      setTotal(respuesta?.total ?? 0)
       setUltimaActualizacion(new Date())
       setError(false)
     } catch {
@@ -325,6 +333,12 @@ export function EnviosPage() {
             <p className="font-medium">Sincronizando envíos...</p>
           </div>
         ) : (
+          <>
+          {total > envios.length && (
+            <p className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600">
+              Se muestran los {envios.length} más recientes de {total}. Usá los filtros para encontrar los demás.
+            </p>
+          )}
           <Tabla
             columnas={columnasTabla}
             filas={envios}
@@ -335,14 +349,9 @@ export function EnviosPage() {
                 : 'No hay envíos en esta categoría.'
             }
           />
+          </>
         )}
       </div>
-
-      {/* HU38 y HU40: Alertas de devoluciones pendientes (>= 24 h) y órdenes de devolución al comercio */}
-      <DepositoDevolucionesSeccion
-        comercios={comercios}
-        alActualizarEnvios={() => void cargarEnvios()}
-      />
     </div>
   )
 }

@@ -152,6 +152,7 @@ export class EnviosService {
       desde,
       hasta,
       q: filtros.q?.trim() || undefined,
+      orden: filtros.orden,
       saltar: (pagina - 1) * limite,
       tomar: limite,
     });
@@ -182,9 +183,30 @@ export class EnviosService {
       idsDe('OPERARIO'),
       idsDe('REPARTIDOR'),
     );
+    // Un paquete de una orden de devolución que no es el que se ofreció muestra igual las
+    // ofertas de la orden (las del representante desde que se creó la orden).
+    const orden = envio.ordenDevolucion;
+    const representante = orden?.envios[0];
+    const ofertasDeLaOrden =
+      orden && representante && representante.id !== envio.id
+        ? representante.ofertas.filter((o) => o.creadaEn >= orden.creadaEn)
+        : [];
+    const { ordenDevolucion, ...datos } = envio;
     return {
-      ...envio,
-      historial: armarHistorial(envio.eventos, envio.ofertas, nombres),
+      ...datos,
+      ordenDevolucion: ordenDevolucion && {
+        id: ordenDevolucion.id,
+        confirmadaEn: ordenDevolucion.confirmadaEn,
+        paquetes: ordenDevolucion.envios.map((p) => ({
+          envioId: p.id,
+          codigoSeguimiento: p.codigoSeguimiento,
+        })),
+      },
+      historial: armarHistorial(
+        envio.eventos,
+        [...envio.ofertas, ...ofertasDeLaOrden],
+        nombres,
+      ),
     };
   }
 

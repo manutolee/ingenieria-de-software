@@ -27,6 +27,7 @@ describe('Depósito y devoluciones (HU 37, 38, 39 y 40)', () => {
     listarEnCustodia: jest.fn(),
     crearOrdenDevolucion: jest.fn(),
     buscarOrdenActivaPorRepartidor: jest.fn(),
+    listarOrdenes: jest.fn(),
     confirmarDevolucion: jest.fn(),
   };
   const enviosRepository = {
@@ -337,6 +338,109 @@ describe('Depósito y devoluciones (HU 37, 38, 39 y 40)', () => {
       ).toEqual([
         ['C', 25],
         ['A', 24],
+      ]);
+    });
+  });
+
+  describe('Pestaña Depósito', () => {
+    it('agrupa la custodia por comercio y resume el estado de cada orden', async () => {
+      const ahora = new Date('2026-11-17T18:00:00.000Z');
+      const hace = (horas: number) =>
+        new Date(ahora.getTime() - horas * 3_600_000);
+      const otro = { id: 2, nombre: 'Almacén Luz', direccion: 'Calle 1 1' };
+      depositoRepository.listarEnCustodia.mockResolvedValue([
+        {
+          id: 1,
+          codigoSeguimiento: 'A',
+          destinoDireccion: 'x',
+          tamanio: 'CHICO',
+          comercio: COMERCIO,
+          eventos: [{ creadoEn: hace(30) }],
+        },
+        {
+          id: 2,
+          codigoSeguimiento: 'B',
+          destinoDireccion: 'y',
+          tamanio: 'CHICO',
+          comercio: otro,
+          eventos: [{ creadoEn: hace(2) }],
+        },
+        {
+          id: 3,
+          codigoSeguimiento: 'C',
+          destinoDireccion: 'z',
+          tamanio: 'CHICO',
+          comercio: COMERCIO,
+          eventos: [{ creadoEn: hace(5) }],
+        },
+      ]);
+      const paquete = (id: number, ofertas: object[] = []) => ({
+        id,
+        codigoSeguimiento: `P${id}`,
+        estado: 'EN_DEVOLUCION',
+        ofertas,
+      });
+      depositoRepository.listarOrdenes.mockResolvedValue([
+        {
+          id: 1,
+          creadaEn: ahora,
+          confirmadaEn: null,
+          comercio: COMERCIO,
+          repartidor: null,
+          envios: [paquete(10), paquete(11)],
+        },
+        {
+          id: 2,
+          creadaEn: ahora,
+          confirmadaEn: null,
+          comercio: COMERCIO,
+          repartidor: null,
+          envios: [
+            paquete(12, [{ repartidor: { nombre: 'Ana', apellido: 'Paz' } }]),
+          ],
+        },
+        {
+          id: 3,
+          creadaEn: ahora,
+          confirmadaEn: null,
+          comercio: COMERCIO,
+          repartidor: { nombre: 'Lu', apellido: 'Gó' },
+          envios: [paquete(13)],
+        },
+        {
+          id: 4,
+          creadaEn: ahora,
+          confirmadaEn: ahora,
+          comercio: COMERCIO,
+          repartidor: { nombre: 'Lu', apellido: 'Gó' },
+          envios: [paquete(14)],
+        },
+      ]);
+
+      const { custodia, ordenes } = await depositoService.resumen(ahora);
+
+      expect(
+        custodia.map((g) => [
+          g.comercio.nombre,
+          g.paquetes.map((p) => [p.codigoSeguimiento, p.alerta]),
+        ]),
+      ).toEqual([
+        ['Almacén Luz', [['B', false]]],
+        [
+          'Panadería Sol',
+          [
+            ['A', true],
+            ['C', false],
+          ],
+        ],
+      ]);
+      expect(
+        ordenes.map((o) => [o.estado, o.repartidor, o.paquetes.length]),
+      ).toEqual([
+        ['SIN_REPARTIDOR', null, 2],
+        ['OFRECIDA', 'Ana Paz', 1],
+        ['EN_CAMINO', 'Lu Gó', 1],
+        ['DEVUELTA', 'Lu Gó', 1],
       ]);
     });
   });
