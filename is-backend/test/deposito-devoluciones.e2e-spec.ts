@@ -316,4 +316,73 @@ describe('Depósito y devoluciones (e2e)', () => {
     const panel = await comoOperario('get', 'envios/panel');
     expect(panel.body.total).toBe(0);
   });
+
+  it('HU 22 y 38: una orden sin repartidor aparece en excepciones y se asigna a mano', async () => {
+    const rindiendo = await crearRepartidor(
+      'Lucas',
+      'ESPERANDO_VALIDACION_CIERRE',
+    );
+    const paquete = await crearPaqueteADevolver(rindiendo);
+    await reingresar(rindiendo, paquete.codigoSeguimiento).then((r) =>
+      expect(r.status).toBe(200),
+    );
+
+    // Nadie en la cola: la orden queda esperando repartidor.
+    const orden = await comoOperario(
+      'post',
+      'envios/deposito/ordenes-devolucion',
+      {
+        comercioId,
+        envioIds: [paquete.id],
+      },
+    );
+    expect(orden.body).toMatchObject({ ofrecida: false });
+
+    const panel = await comoOperario('get', 'excepciones');
+    expect(panel.body.excepciones).toEqual([
+      expect.objectContaining({
+        envioId: paquete.id,
+        motivo: 'DEVOLUCION_SIN_REPARTIDOR',
+        destinoDireccion: 'Calle 7 123',
+        puedeAsignar: true,
+        puedeCancelar: false,
+      }),
+    ]);
+
+    const repartidorId = await crearRepartidor('Sofía', 'DISPONIBLE');
+    // El motor la reintentaría solo; acá se la asigna el operario antes.
+    await prisma.repartidor.update({
+      where: { id: repartidorId },
+      data: { estado: 'EN_PAUSA', enColaDesde: null },
+    });
+    const asignada = await comoOperario(
+      'post',
+      `excepciones/${paquete.id}/asignar`,
+      { repartidorId },
+    );
+    expect(asignada.status).toBe(200);
+
+    const oferta = await comoRepartidor(
+      repartidorId,
+      'get',
+      'repartidor/ofertas/actual',
+    );
+    await comoRepartidor(
+      repartidorId,
+      'post',
+      `repartidor/ofertas/${oferta.body.oferta.id}/aceptar`,
+    ).then((r) => expect(r.status).toBe(200));
+    const viaje = await comoRepartidor(
+      repartidorId,
+      'get',
+      'repartidor/viajes/actual',
+    );
+    expect(viaje.body.viaje).toMatchObject({
+      esDevolucion: true,
+      paquetes: [paquete.codigoSeguimiento],
+    });
+    expect((await comoOperario('get', 'excepciones')).body.excepciones).toEqual(
+      [],
+    );
+  });
 });

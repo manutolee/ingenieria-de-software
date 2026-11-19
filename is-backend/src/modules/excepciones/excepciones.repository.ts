@@ -14,7 +14,11 @@ type Tx = Prisma.TransactionClient;
 type EnvioBloqueado = {
   id: number;
   estado: EstadoEnvio;
+  // En una orden de devolución, el de la orden (HU 38).
   vehiculoRequerido: TipoVehiculo;
+  ordenDevolucionId: number | null;
+  ordenTieneRepartidor: boolean;
+  esRepresentanteDeLaOrden: boolean;
 };
 type RepartidorBloqueado = {
   id: number;
@@ -112,10 +116,46 @@ export class ExcepcionesRepository {
     });
   }
 
-  buscarEnvio(envioId: number) {
-    return this.prisma.envio.findUnique({
+  async buscarEnvio(envioId: number) {
+    const envio = await this.prisma.envio.findUnique({
       where: { id: envioId },
-      select: { id: true, vehiculoRequerido: true },
+      select: {
+        id: true,
+        vehiculoRequerido: true,
+        ordenDevolucion: { select: { vehiculoRequerido: true } },
+      },
+    });
+    // Una orden de devolución pide el vehículo de su paquete más grande (HU 38).
+    return envio
+      ? {
+          id: envio.id,
+          vehiculoRequerido:
+            envio.ordenDevolucion?.vehiculoRequerido ?? envio.vehiculoRequerido,
+        }
+      : null;
+  }
+
+  // Órdenes de devolución que todavía nadie lleva y no tienen una oferta en curso (HU 38).
+  // El motor las sigue reintentando; desde el panel el operario puede asignarlas a mano.
+  listarDevolucionesSinRepartidor() {
+    return this.prisma.ordenDevolucion.findMany({
+      where: { repartidorId: null, confirmadaEn: null },
+      select: {
+        id: true,
+        creadaEn: true,
+        vehiculoRequerido: true,
+        comercio: { select: { nombre: true, direccion: true } },
+        envios: {
+          where: { estado: 'EN_DEVOLUCION' },
+          orderBy: { id: 'asc' },
+          select: {
+            id: true,
+            codigoSeguimiento: true,
+            tamanio: true,
+            ofertas: { where: { estado: 'PENDIENTE' }, select: { id: true } },
+          },
+        },
+      },
     });
   }
 
@@ -143,10 +183,16 @@ export class ExcepcionesRepository {
   // Bloquea el envío hasta el final de la transacción (igual que el motor).
   async bloquearEnvio(tx: Tx, envioId: number): Promise<EnvioBloqueado | null> {
     const filas = await tx.$queryRaw<EnvioBloqueado[]>`
-      SELECT id, estado, vehiculo_requerido AS "vehiculoRequerido"
-      FROM envios
-      WHERE id = ${envioId}
-      FOR UPDATE`;
+      SELECT e.id, e.estado,
+        COALESCE(o.vehiculo_requerido, e.vehiculo_requerido) AS "vehiculoRequerido",
+        e.orden_devolucion_id AS "ordenDevolucionId",
+        (o.repartidor_id IS NOT NULL) AS "ordenTieneRepartidor",
+        (e.id = (SELECT MIN(id) FROM envios WHERE orden_devolucion_id = e.orden_devolucion_id))
+          AS "esRepresentanteDeLaOrden"
+      FROM envios e
+      LEFT JOIN ordenes_devolucion o ON o.id = e.orden_devolucion_id
+      WHERE e.id = ${envioId}
+      FOR UPDATE OF e`;
     return filas[0] ?? null;
   }
 

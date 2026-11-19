@@ -41,9 +41,10 @@ export class ExcepcionesService {
   async listar(
     ahora: Date = new Date(),
   ): Promise<{ excepciones: ExcepcionListada[] }> {
-    const [sinRepartidor, incidentes] = await Promise.all([
+    const [sinRepartidor, incidentes, devoluciones] = await Promise.all([
       this.repo.listarSinRepartidor(),
       this.repo.listarIncidentesActivos(),
+      this.repo.listarDevolucionesSinRepartidor(),
     ]);
 
     const excepciones = new Map<number, ExcepcionListada>();
@@ -97,6 +98,32 @@ export class ExcepcionesService {
       });
     }
 
+    for (const orden of devoluciones) {
+      // La orden se ofrece a través de su primer paquete (igual que en el motor).
+      const representante = orden.envios[0];
+      if (!representante || representante.ofertas.length > 0) continue;
+      const cantidad = orden.envios.length;
+      excepciones.set(representante.id, {
+        envioId: representante.id,
+        codigoSeguimiento:
+          cantidad === 1
+            ? representante.codigoSeguimiento
+            : `${representante.codigoSeguimiento} (+${cantidad - 1})`,
+        comercio: orden.comercio.nombre,
+        origenDireccion: 'Depósito (base)',
+        destinoDireccion: orden.comercio.direccion,
+        tamanio: `${cantidad} ${cantidad === 1 ? 'paquete' : 'paquetes'}`,
+        vehiculoRequerido: orden.vehiculoRequerido,
+        estado: 'EN_DEVOLUCION',
+        motivo: 'DEVOLUCION_SIN_REPARTIDOR',
+        aviso: AVISO_MOTIVO.DEVOLUCION_SIN_REPARTIDOR,
+        puedeAsignar: true,
+        puedeCancelar: false,
+        esperaDesde: orden.creadaEn,
+        minutosEspera: minutosDeEspera(orden.creadaEn, ahora),
+      });
+    }
+
     return { excepciones: ordenarPorEspera([...excepciones.values()]) };
   }
 
@@ -117,7 +144,16 @@ export class ExcepcionesService {
     return this.repo.transaccion(async (tx) => {
       const envio = await this.repo.bloquearEnvio(tx, envioId);
       if (!envio) throw new NotFoundException('El envío no existe');
-      if (envio.estado !== 'PENDIENTE' && envio.estado !== 'PARADO')
+      const esOrdenSinRepartidor =
+        envio.estado === 'EN_DEVOLUCION' &&
+        envio.ordenDevolucionId !== null &&
+        !envio.ordenTieneRepartidor &&
+        envio.esRepresentanteDeLaOrden;
+      if (
+        envio.estado !== 'PENDIENTE' &&
+        envio.estado !== 'PARADO' &&
+        !esOrdenSinRepartidor
+      )
         throw new ConflictException('El envío ya no espera repartidor');
       if (await this.repo.envioTieneOfertaVigente(tx, envioId))
         throw new ConflictException(
