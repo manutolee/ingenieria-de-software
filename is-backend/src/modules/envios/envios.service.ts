@@ -25,6 +25,7 @@ import { armarHistorial } from './domain/historial';
 import { ActualizarEnvioDto } from './dto/actualizar-envio.dto';
 import { CrearEnvioDto } from './dto/crear-envio.dto';
 import { ListarEnviosDto } from './dto/listar-envios.dto';
+import { ReintentarEnvioDto } from './dto/reintentar-envio.dto';
 import { EnviosRepository } from './envios.repository';
 
 // Vehículo MÍNIMO según el tamaño (supuesto 8): el motor después acepta uno más grande.
@@ -237,6 +238,73 @@ export class EnviosService {
     // abierta): que el motor les ofrezca los envíos que esperan.
     await this.asignacion.reintentarPendientes();
     return cancelado;
+  }
+
+  async reintentar(
+    id: number,
+    dto: ReintentarEnvioDto,
+    operarioId: number,
+  ) {
+    const envio = await this.enviosRepository.obtenerEstado(id);
+    if (!envio) {
+      throw new NotFoundException('El envío no existe');
+    }
+    if (envio.estado !== 'CON_NOVEDAD') {
+      throw new ConflictException(
+        'Solo se pueden reintentar envíos con novedad',
+      );
+    }
+    if (!esTransicionValida(envio.estado, 'RETIRADO', 'OPERARIO')) {
+      throw new ConflictException('No se puede reintentar este envío');
+    }
+
+    const resultado = await this.enviosRepository.reintentar(
+      id,
+      envio.estado,
+      dto,
+      operarioId,
+    );
+    if (!resultado) {
+      throw new ConflictException(
+        'El envío o el repartidor cambió de estado. Actualizá el detalle e intentá nuevamente.',
+      );
+    }
+    return {
+      ...resultado,
+      mensaje: resultado.asignadoAhora
+        ? 'Reintento asignado al repartidor'
+        : 'Reintento en espera: se asignará al mismo repartidor cuando esté disponible',
+    };
+  }
+
+  async marcarParaDevolucion(id: number, operarioId: number) {
+    const envio = await this.enviosRepository.obtenerEstado(id);
+    if (!envio) {
+      throw new NotFoundException('El envío no existe');
+    }
+    if (envio.estado !== 'CON_NOVEDAD') {
+      throw new ConflictException(
+        'Solo se pueden devolver envíos con novedad',
+      );
+    }
+    if (!esTransicionValida(envio.estado, 'A_DEVOLVER', 'OPERARIO')) {
+      throw new ConflictException('No se puede devolver este envío');
+    }
+
+    const resultado = await this.enviosRepository.marcarParaDevolucion(
+      id,
+      operarioId,
+    );
+    if (!resultado) {
+      throw new ConflictException(
+        'El envío cambió de estado, intentá nuevamente',
+      );
+    }
+    return resultado;
+  }
+
+  asignarReintentoPendiente(repartidorId: number): Promise<boolean> {
+    return this.enviosRepository.asignarReintentoPendiente(repartidorId);
   }
 
   async actualizar(id: number, dto: ActualizarEnvioDto, operarioId: number) {

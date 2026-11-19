@@ -9,6 +9,7 @@ describe('ViajesService', () => {
     avanzarViaje: jest.fn(),
     listarEntregadosDelRepartidorDesde: jest.fn(),
     reportarIncidente: jest.fn(),
+    reportarNovedad: jest.fn(),
   };
   const asignacion = {
     asignar: jest.fn(),
@@ -132,6 +133,38 @@ describe('ViajesService', () => {
       service.reportarIncidente(1, { ubicacion: 'Calle 9 123' }),
     ).rejects.toThrow('No tenés un viaje activo para reportar un incidente');
     expect(repository.reportarIncidente).not.toHaveBeenCalled();
+  });
+
+  it('registra una novedad en domicilio y devuelve al repartidor a su cola', async () => {
+    repository.buscarViajeActivoPorRepartidor.mockResolvedValue(
+      envioEn('EN_DOMICILIO'),
+    );
+    repository.reportarNovedad.mockResolvedValue(true);
+
+    await expect(
+      service.reportarNovedad(1, {
+        motivo: 'DIRECCION_INCORRECTA',
+        comentario: 'El número no existe',
+      }),
+    ).resolves.toEqual({
+      estado: 'CON_NOVEDAD',
+      mensaje: 'Novedad registrada. El operario decidirá cómo continuar.',
+    });
+    expect(repository.reportarNovedad).toHaveBeenCalledWith(1, {
+      motivo: 'DIRECCION_INCORRECTA',
+      comentario: 'El número no existe',
+    });
+    expect(asignacion.reintentarPendientes).toHaveBeenCalled();
+  });
+
+  it('no permite reportar una novedad antes de llegar al domicilio', async () => {
+    repository.buscarViajeActivoPorRepartidor.mockResolvedValue(
+      envioEn('RETIRADO'),
+    );
+    await expect(
+      service.reportarNovedad(1, { motivo: 'CLIENTE_AUSENTE' }),
+    ).rejects.toThrow('Solo podés reportar una novedad al llegar al domicilio');
+    expect(repository.reportarNovedad).not.toHaveBeenCalled();
   });
 
   it('avanza un paso y no dispara el motor si todavía no entregó', async () => {

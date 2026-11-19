@@ -8,6 +8,7 @@ import {
 import type { AsignacionService } from '../asignacion/asignacion.service';
 import type { OfertasService } from '../asignacion/ofertas.service';
 import type { AuthService } from '../auth/auth.service';
+import type { EnviosService } from '../envios/envios.service';
 import type {
   RepartidoresRepository,
   RepartidorPublico,
@@ -20,6 +21,7 @@ describe('RepartidoresService', () => {
   let authService: jest.Mocked<AuthService>;
   let asignacion: jest.Mocked<AsignacionService>;
   let ofertasService: jest.Mocked<OfertasService>;
+  let enviosService: jest.Mocked<EnviosService>;
 
   const repartidorEjemplo: RepartidorPublico = {
     id: 1,
@@ -69,12 +71,16 @@ describe('RepartidoresService', () => {
     ofertasService = {
       consultarHistorial: jest.fn(),
     } as unknown as jest.Mocked<OfertasService>;
+    enviosService = {
+      asignarReintentoPendiente: jest.fn(),
+    } as unknown as jest.Mocked<EnviosService>;
 
     servicio = new RepartidoresService(
       repo,
       authService,
       asignacion,
       ofertasService,
+      enviosService,
     );
   });
 
@@ -243,9 +249,24 @@ describe('RepartidoresService', () => {
           estado: 'DISPONIBLE',
         });
         expect(repo.rehabilitar).toHaveBeenCalledWith(1);
+        expect(enviosService.asignarReintentoPendiente).toHaveBeenCalledWith(1);
         expect(asignacion.reintentarPendientes).toHaveBeenCalled();
       },
     );
+
+    it('devuelve OCUPADO si al rehabilitar asigna un reintento pendiente', async () => {
+      repo.buscarPorId.mockResolvedValue({
+        ...repartidorEjemplo,
+        estado: EstadoRepartidor.EMERGENCIA,
+      });
+      repo.rehabilitar.mockResolvedValue(true);
+      enviosService.asignarReintentoPendiente.mockResolvedValue(true);
+
+      await expect(servicio.rehabilitar(1)).resolves.toEqual({
+        estado: 'OCUPADO',
+      });
+      expect(asignacion.reintentarPendientes).toHaveBeenCalled();
+    });
 
     it('rechaza rehabilitar un repartidor que no está en emergencia ni en pausa', async () => {
       repo.buscarPorId.mockResolvedValue(repartidorEjemplo);

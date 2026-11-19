@@ -18,6 +18,7 @@ import {
 import { ActualizarEnvioDto } from './dto/actualizar-envio.dto';
 import { CrearEnvioDto } from './dto/crear-envio.dto';
 import { ListarEnviosDto } from './dto/listar-envios.dto';
+import { ReintentarEnvioDto } from './dto/reintentar-envio.dto';
 import { EnviosService } from './envios.service';
 
 @Controller('envios')
@@ -65,5 +66,24 @@ export class EnviosController {
     @UsuarioActual() usuario: UsuarioAutenticado,
   ) {
     return this.enviosService.cancelar(id, usuario.id);
+  }
+
+  @Post(':id/reintentar')
+  @HttpCode(HttpStatus.OK)
+  async reintentar(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ReintentarEnvioDto,
+    @UsuarioActual() usuario: UsuarioAutenticado,
+  ) {
+    return this.enviosService.reintentar(id, dto, usuario.id);
+  }
+
+  @Post(':id/devolver')
+  @HttpCode(HttpStatus.OK)
+  async marcarParaDevolucion(
+    @Param('id', ParseIntPipe) id: number,
+    @UsuarioActual() usuario: UsuarioAutenticado,
+  ) {
+    return this.enviosService.marcarParaDevolucion(id, usuario.id);
   }
 }

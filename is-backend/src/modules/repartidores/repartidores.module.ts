@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AsignacionModule } from '../asignacion/asignacion.module';
 import { AuthModule } from '../auth/auth.module';
+import { EnviosModule } from '../envios/envios.module';
 import { FlotaController } from './flota.controller';
 import { JornadaController } from './jornada.controller';
 import { JornadaService } from './jornada.service';
@@ -11,7 +12,7 @@ import { RepartidoresService } from './repartidores.service';
 
 @Module({
   // AsignacionModule: iniciar o reanudar la jornada dispara el motor (C-3).
-  imports: [AuthModule, AsignacionModule],
+  imports: [AuthModule, AsignacionModule, EnviosModule],
   controllers: [
     RepartidoresController,
     JornadaController,

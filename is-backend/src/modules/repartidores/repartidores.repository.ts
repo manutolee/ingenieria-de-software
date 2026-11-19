@@ -272,16 +272,23 @@ export class RepartidoresRepository {
     return count > 0;
   }
 
-  // Paquetes que el repartidor tiene que devolver en la base: los que retiró del comercio y
-  // le cancelaron antes de entregarlos, y que todavía no devolvió. Cuando existan las
-  // novedades en ruta (E-5) se suman acá los que no pudo entregar.
+  // Paquetes que el repartidor tiene que devolver en la base: cancelados después del retiro
+  // o marcados para devolución desde una novedad, y que todavía no devolvió.
   async obtenerPaquetesADevolver(repartidorId: number) {
     const envios = await this.prisma.envio.findMany({
       where: {
         repartidorId,
-        estado: 'CANCELADO',
         AND: [
-          { eventos: { some: { estadoNuevo: 'RETIRADO' } } },
+          {
+            OR: [
+              {
+                estado: 'CANCELADO',
+                eventos: { some: { estadoNuevo: 'RETIRADO' } },
+              },
+              { estado: 'A_DEVOLVER' },
+              { estado: 'CON_NOVEDAD', reintentoPendiente: false },
+            ],
+          },
           { eventos: { none: { tipo: 'DEVOLUCION' } } },
         ],
       },
@@ -289,6 +296,7 @@ export class RepartidoresRepository {
       select: {
         id: true,
         codigoSeguimiento: true,
+        estado: true,
         destinoDireccion: true,
         comercio: { select: { nombre: true, direccion: true } },
       },
@@ -296,7 +304,12 @@ export class RepartidoresRepository {
 
     return envios.map((envio) => ({
       ...envio,
-      motivo: 'Cancelado después del retiro',
+      motivo:
+        envio.estado === 'A_DEVOLVER'
+          ? 'Marcado para devolución por novedad'
+          : envio.estado === 'CON_NOVEDAD'
+            ? 'Envío con novedad pendiente de resolución'
+          : 'Cancelado después del retiro',
     }));
   }
 

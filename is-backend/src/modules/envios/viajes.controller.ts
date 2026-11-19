@@ -7,6 +7,7 @@ import {
 import { AvanzarViajeDto } from './dto/avanzar-viaje.dto';
 import { ConfirmarDevolucionDto } from './dto/confirmar-devolucion.dto';
 import { ReportarIncidenteDto } from './dto/reportar-incidente.dto';
+import { ReportarNovedadDto } from './dto/reportar-novedad.dto';
 import { ViajesService } from './viajes.service';
 
 // Endpoints del repartidor logueado sobre su viaje activo (E-2).
@@ -54,5 +55,14 @@ export class ViajesController {
     @Body() dto: ReportarIncidenteDto,
   ) {
     return this.viajesService.reportarIncidente(usuario.id, dto);
+  }
+
+  @Post('actual/novedad')
+  @HttpCode(200)
+  reportarNovedad(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: ReportarNovedadDto,
+  ) {
+    return this.viajesService.reportarNovedad(usuario.id, dto);
   }
 }
