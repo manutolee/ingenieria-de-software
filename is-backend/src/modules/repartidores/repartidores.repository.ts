@@ -27,11 +27,17 @@ export type RepartidorPublico = Prisma.RepartidorGetPayload<{
   select: typeof SELECT_REPARTIDOR_PUBLICO;
 }>;
 
+// Envíos que el repartidor tiene a su cargo: un viaje en curso, una devolución que está
+// llevando al comercio o un paquete que todavía no rindió en la base. Mientras tenga alguno
+// no se le puede cambiar el vehículo ni dar de baja (HU 33).
 const ESTADOS_VIAJE_ACTIVO: EstadoEnvio[] = [
   EstadoEnvio.ASIGNADO,
   EstadoEnvio.EN_CAMINO_A_RETIRAR,
   EstadoEnvio.RETIRADO,
   EstadoEnvio.EN_DOMICILIO,
+  EstadoEnvio.CON_NOVEDAD,
+  EstadoEnvio.A_DEVOLVER,
+  EstadoEnvio.EN_DEVOLUCION,
 ];
 
 // Viaje activo en tránsito según HU #68: "En camino a retirar", "Paquete en poder" (RETIRADO) y "En domicilio de entrega".
@@ -272,24 +278,16 @@ export class RepartidoresRepository {
     return count > 0;
   }
 
-  // Paquetes que el repartidor tiene que devolver en la base: cancelados después del retiro
-  // o marcados para devolución desde una novedad, y que todavía no devolvió.
+  // Paquetes que el repartidor tiene que devolver en la base (HU 35): los marcados para
+  // devolución y las novedades que el operario no mandó a reintentar. Salen de la lista
+  // cuando el operario registra su reingreso al depósito (HU 37).
   async obtenerPaquetesADevolver(repartidorId: number) {
     const envios = await this.prisma.envio.findMany({
       where: {
         repartidorId,
-        AND: [
-          {
-            OR: [
-              {
-                estado: 'CANCELADO',
-                eventos: { some: { estadoNuevo: 'RETIRADO' } },
-              },
-              { estado: 'A_DEVOLVER' },
-              { estado: 'CON_NOVEDAD', reintentoPendiente: false },
-            ],
-          },
-          { eventos: { none: { tipo: 'DEVOLUCION' } } },
+        OR: [
+          { estado: 'A_DEVOLVER' },
+          { estado: 'CON_NOVEDAD', reintentoPendiente: false },
         ],
       },
       orderBy: { id: 'asc' },
@@ -307,41 +305,22 @@ export class RepartidoresRepository {
       motivo:
         envio.estado === 'A_DEVOLVER'
           ? 'Marcado para devolución por novedad'
-          : envio.estado === 'CON_NOVEDAD'
-            ? 'Envío con novedad pendiente de resolución'
-          : 'Cancelado después del retiro',
+          : 'Envío con novedad pendiente de resolución',
     }));
   }
 
-  // G-1: cierra la jornada y deja en el historial de cada paquete que volvió a la base. Solo
-  // si sigue esperando la validación (otro operario pudo haberla aprobado en el medio).
-  async aprobarCierre(
-    id: number,
-    envioIdsDevueltos: number[],
-    operarioId: number,
-  ): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.repartidor.updateMany({
-        where: { id, estado: 'ESPERANDO_VALIDACION_CIERRE' },
-        data: {
-          estado: 'FUERA_DE_JORNADA',
-          enColaDesde: null,
-          cierreSolicitado: false,
-          viajesConsecutivos: 0,
-        },
-      });
-      if (count === 0) return false;
-
-      await tx.eventoEnvio.createMany({
-        data: envioIdsDevueltos.map((envioId) => ({
-          envioId,
-          tipo: 'DEVOLUCION' as const,
-          detalle: 'Paquete devuelto en la base',
-          actorTipo: 'OPERARIO' as const,
-          actorId: operarioId,
-        })),
-      });
-      return true;
+  // G-1: cierra la jornada. Solo si sigue esperando la validación (otro operario pudo
+  // haberla aprobado en el medio).
+  async aprobarCierre(id: number): Promise<boolean> {
+    const { count } = await this.prisma.repartidor.updateMany({
+      where: { id, estado: 'ESPERANDO_VALIDACION_CIERRE' },
+      data: {
+        estado: 'FUERA_DE_JORNADA',
+        enColaDesde: null,
+        cierreSolicitado: false,
+        viajesConsecutivos: 0,
+      },
     });
+    return count > 0;
   }
 }

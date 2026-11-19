@@ -229,24 +229,24 @@ describe('JornadaService', () => {
   describe('aprobarCierre (G-1)', () => {
     const paquete = { id: 10 };
 
-    it('aprueba cuando el operario recibió todos los paquetes a devolver', async () => {
+    it('aprueba cuando ya se reingresaron todos los paquetes a devolver', async () => {
       estaEn('ESPERANDO_VALIDACION_CIERRE');
-      repo.obtenerPaquetesADevolver.mockResolvedValue([paquete, { id: 11 }]);
+      repo.obtenerPaquetesADevolver.mockResolvedValue([]);
       repo.aprobarCierre.mockResolvedValue(true);
 
-      await expect(
-        servicio.aprobarCierre(1, { paquetesDevueltos: 2 }, 7),
-      ).resolves.toMatchObject({ estado: 'FUERA_DE_JORNADA' });
-      expect(repo.aprobarCierre).toHaveBeenCalledWith(1, [10, 11], 7);
+      await expect(servicio.aprobarCierre(1)).resolves.toMatchObject({
+        estado: 'FUERA_DE_JORNADA',
+      });
+      expect(repo.aprobarCierre).toHaveBeenCalledWith(1);
       expect(auth.cerrarSesiones).toHaveBeenCalledWith('REPARTIDOR', 1);
     });
 
-    it('rechaza si faltan rendir paquetes', async () => {
+    it('rechaza si faltan reingresar paquetes', async () => {
       estaEn('ESPERANDO_VALIDACION_CIERRE');
       repo.obtenerPaquetesADevolver.mockResolvedValue([paquete, { id: 11 }]);
 
       await expect(
-        servicio.aprobarCierre(1, { paquetesDevueltos: 0 }, 7),
+        servicio.aprobarCierre(1),
       ).rejects.toThrow('Faltan rendir 2 paquetes');
       expect(repo.aprobarCierre).not.toHaveBeenCalled();
     });
@@ -255,7 +255,7 @@ describe('JornadaService', () => {
       estaEn('OCUPADO');
 
       await expect(
-        servicio.aprobarCierre(1, { paquetesDevueltos: 0 }, 7),
+        servicio.aprobarCierre(1),
       ).rejects.toThrow('El repartidor no solicitó el cierre de jornada');
       expect(repo.aprobarCierre).not.toHaveBeenCalled();
     });

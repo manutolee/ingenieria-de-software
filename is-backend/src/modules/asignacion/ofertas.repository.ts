@@ -29,7 +29,19 @@ export class OfertasRepository {
         expiraEn: { gt: new Date() },
       },
       include: {
-        envio: { include: { comercio: { select: { nombre: true } } } },
+        envio: {
+          include: {
+            comercio: { select: { nombre: true, direccion: true } },
+            ordenDevolucion: {
+              select: {
+                envios: {
+                  where: { estado: 'EN_DEVOLUCION' },
+                  select: { tamanio: true },
+                },
+              },
+            },
+          },
+        },
       },
     });
   }
@@ -53,13 +65,44 @@ export class OfertasRepository {
       where: { id: oferta.id },
       data: { estado: 'ACEPTADA', respondidaEn: new Date() },
     });
-    await tx.envio.update({
-      where: { id: oferta.envioId },
-      data: { estado: 'ASIGNADO', repartidorId: oferta.repartidorId },
-    });
     await tx.repartidor.update({
       where: { id: oferta.repartidorId },
       data: { estado: 'OCUPADO', enColaDesde: null },
+    });
+
+    // Orden de devolución (HU 38): el repartidor se lleva todos los paquetes de la orden.
+    // Siguen "En devolución" hasta que el comercio los recibe (HU 39).
+    if (envio.estado === 'EN_DEVOLUCION' && envio.ordenDevolucionId !== null) {
+      await tx.ordenDevolucion.update({
+        where: { id: envio.ordenDevolucionId },
+        data: { repartidorId: oferta.repartidorId },
+      });
+      const paquetes = await tx.envio.findMany({
+        where: {
+          ordenDevolucionId: envio.ordenDevolucionId,
+          estado: 'EN_DEVOLUCION',
+        },
+        select: { id: true },
+      });
+      await tx.envio.updateMany({
+        where: { id: { in: paquetes.map((paquete) => paquete.id) } },
+        data: { repartidorId: oferta.repartidorId },
+      });
+      await tx.eventoEnvio.createMany({
+        data: paquetes.map((paquete) => ({
+          envioId: paquete.id,
+          tipo: 'NOTA' as const,
+          detalle: 'Devolución asignada: el repartidor lleva el paquete al comercio',
+          actorTipo: 'REPARTIDOR' as const,
+          actorId: oferta.repartidorId,
+        })),
+      });
+      return;
+    }
+
+    await tx.envio.update({
+      where: { id: oferta.envioId },
+      data: { estado: 'ASIGNADO', repartidorId: oferta.repartidorId },
     });
     await tx.eventoEnvio.create({
       data: {

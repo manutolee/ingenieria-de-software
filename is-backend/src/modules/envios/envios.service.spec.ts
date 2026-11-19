@@ -750,6 +750,7 @@ describe('EnviosService', () => {
       expect(repository.obtenerPanelEnvios).toHaveBeenCalledWith([
         'ENTREGADO',
         'CANCELADO',
+        'DEVUELTO_AL_COMERCIO',
       ]);
     });
 
@@ -780,6 +781,8 @@ describe('EnviosService', () => {
         { estado: 'PARADO', cantidad: 0, ids: [] },
         { estado: 'CON_NOVEDAD', cantidad: 0, ids: [] },
         { estado: 'A_DEVOLVER', cantidad: 0, ids: [] },
+        { estado: 'EN_CUSTODIA', cantidad: 0, ids: [] },
+        { estado: 'EN_DEVOLUCION', cantidad: 0, ids: [] },
       ]);
     });
 

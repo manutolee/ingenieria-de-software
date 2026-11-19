@@ -1,75 +1,79 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
-import type { Prisma } from '../../generated/prisma/client';
+import type { EstadoEnvio, TipoVehiculo } from '../../generated/prisma/client';
+import { VEHICULOS_DE_MENOR_A_MAYOR } from '../asignacion/domain/vehiculos';
 import {
   DETALLE_DEVUELTO_AL_COMERCIO,
   DETALLE_EN_CUSTODIA,
   DETALLE_EN_DEVOLUCION,
 } from './domain/deposito';
+import { EnviosRepository } from './envios.repository';
 
-// ============================================================================
-// REPOSITORY DE DEPÓSITO Y DEVOLUCIONES (HU37, HU38, HU39, HU40)
-// ============================================================================
-// Capa de acceso a datos con PrismaService. Sin reglas de negocio.
-//
-// GUÍA DE INGENIERÍA INVERSA (Para revisar con Salvador):
-// Cada método que persiste un cambio de estado en el circuito de depósito
-// registra su `EventoEnvio` con `tipo = 'DEVOLUCION'` y el `detalle` de la etapa
-// (`'En custodia'`, `'En devolución'`, `'Devuelto al comercio'`).
-// Debajo de cada escritura dejamos marcado con `// TODO(schema-F2)` el cambio
-// exacto para cuando agreguen `A_DEVOLVER`, `EN_CUSTODIA`, `EN_DEVOLUCION` y
-// `DEVUELTO_AL_COMERCIO` al enum `EstadoEnvio` en `schema.prisma`.
-// ============================================================================
+// Acceso a datos del circuito de depósito y devoluciones (HU 37-40). Cada cambio de estado
+// es condicional (where estado = el esperado) y deja su evento en el historial del envío.
 @Injectable()
 export class DepositoRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    // Para liberar al repartidor con las mismas reglas que al terminar una entrega.
+    private readonly enviosRepository: EnviosRepository,
+  ) {}
 
-  // Busca un envío por su código de seguimiento junto con sus eventos para validar
-  // si pertenece a la jornada del repartidor y si puede reingresar a custodia (HU37).
-  async buscarPorCodigo(codigoSeguimiento: string) {
+  buscarPorCodigo(codigoSeguimiento: string) {
     return this.prisma.envio.findUnique({
       where: { codigoSeguimiento },
-      omit: { fotoUrl: true },
-      include: {
+      select: {
+        id: true,
+        codigoSeguimiento: true,
+        estado: true,
+        repartidorId: true,
+        reintentoPendiente: true,
         comercio: { select: { id: true, nombre: true, direccion: true } },
-        eventos: { orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }] },
       },
     });
   }
 
-  // HU37: Registra el reingreso del paquete al depósito bajo custodia del operario.
-  // - Al crear un evento con `tipo: 'DEVOLUCION'`, la consulta `obtenerPaquetesADevolver`
-  //   de G-1 (`repartidores.repository.ts`) automáticamente quita este paquete de la
-  //   rendición pendiente del repartidor (Escenario 1).
-  // - Al guardar `actorTipo: 'OPERARIO'` y `actorId: operarioId`, el historial del envío
-  //   muestra "En custodia" con fecha, hora y el nombre del operario (Escenario 4).
-  async registrarReingresoCustodia(
+  async estadoDelRepartidor(repartidorId: number) {
+    const repartidor = await this.prisma.repartidor.findUnique({
+      where: { id: repartidorId },
+      select: { estado: true },
+    });
+    return repartidor?.estado ?? null;
+  }
+
+  // HU 37: el paquete pasa a custodia del depósito y deja de estar en manos del repartidor.
+  // Devuelve null si el envío cambió mientras tanto.
+  registrarReingresoCustodia(
     envioId: number,
+    estadoAnterior: EstadoEnvio,
     operarioId: number,
-  ): Promise<{ fechaReingreso: Date; operarioNombre: string | null }> {
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      // TODO(schema-F2): Cuando Salvador agregue `EN_CUSTODIA` al enum `EstadoEnvio`:
-      // await tx.envio.update({
-      //   where: { id: envioId },
-      //   data: { estado: 'EN_CUSTODIA' },
-      // });
+      const { count } = await tx.envio.updateMany({
+        where: { id: envioId, estado: estadoAnterior },
+        data: {
+          estado: 'EN_CUSTODIA',
+          repartidorId: null,
+          reintentoPendiente: false,
+        },
+      });
+      if (count === 0) return null;
 
       const evento = await tx.eventoEnvio.create({
         data: {
           envioId,
           tipo: 'DEVOLUCION',
-          // TODO(schema-F2): Pasar `estadoNuevo: 'EN_CUSTODIA'` cuando exista en el enum.
+          estadoAnterior,
+          estadoNuevo: 'EN_CUSTODIA',
           detalle: DETALLE_EN_CUSTODIA,
           actorTipo: 'OPERARIO',
           actorId: operarioId,
         },
       });
-
       const operario = await tx.operario.findUnique({
         where: { id: operarioId },
         select: { nombre: true },
       });
-
       return {
         fechaReingreso: evento.creadoEn,
         operarioNombre: operario?.nombre ?? null,
@@ -77,130 +81,137 @@ export class DepositoRepository {
     });
   }
 
-  // HU38 y HU40: Obtiene todos los envíos que ingresaron al circuito de depósito
-  // (opcionalmente filtrados por `comercioId`), con sus eventos ordenados para que el
-  // dominio determine cuáles siguen "En custodia" y cuáles llevan >= 24 h.
-  async listarEnviosEnCircuitoDeposito(comercioId?: number) {
+  // HU 38 y HU 40: paquetes en custodia, con la fecha de su último reingreso.
+  listarEnCustodia(comercioId?: number) {
     return this.prisma.envio.findMany({
       where: {
-        ...(comercioId !== undefined ? { comercioId } : {}),
-        eventos: {
-          some: {
-            OR: [{ tipo: 'DEVOLUCION' }, { detalle: DETALLE_EN_CUSTODIA }],
-          },
-        },
+        estado: 'EN_CUSTODIA',
+        ...(comercioId !== undefined && { comercioId }),
       },
-      orderBy: [{ id: 'asc' }],
-      omit: { fotoUrl: true },
-      include: {
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        codigoSeguimiento: true,
+        destinoDireccion: true,
+        tamanio: true,
         comercio: { select: { id: true, nombre: true, direccion: true } },
-        eventos: { orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }] },
+        eventos: {
+          where: { estadoNuevo: 'EN_CUSTODIA' },
+          orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: { creadoEn: true },
+        },
       },
     });
   }
 
-  // HU38: Pasa los paquetes seleccionados de un mismo comercio a "En devolución"
-  // dentro de una única transacción para que entren al motor de asignación automática.
-  async crearOrdenDevolucion(
+  // HU 38: arma la orden con paquetes en custodia de un comercio y los pasa a "En devolución".
+  // Devuelve null si alguno ya no está en custodia (otro operario lo incluyó en otra orden).
+  crearOrdenDevolucion(
+    comercioId: number,
     envioIds: number[],
     operarioId: number,
-  ): Promise<Date> {
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      // TODO(schema-F2): Cuando Salvador agregue `EN_DEVOLUCION` (o tabla `OrdenDevolucion`)
-      // en `schema.prisma`, actualizar acá el estado de los envíos:
-      // await tx.envio.updateMany({
-      //   where: { id: { in: envioIds } },
-      //   data: { estado: 'EN_DEVOLUCION', repartidorId: null },
-      // });
+      const envios = await tx.envio.findMany({
+        where: { id: { in: envioIds }, comercioId, estado: 'EN_CUSTODIA' },
+        select: { id: true, vehiculoRequerido: true },
+      });
+      if (envios.length !== envioIds.length) return null;
 
-      const ahora = new Date();
+      const orden = await tx.ordenDevolucion.create({
+        data: {
+          comercioId,
+          vehiculoRequerido: vehiculoMasGrande(
+            envios.map((envio) => envio.vehiculoRequerido),
+          ),
+        },
+      });
+      const { count } = await tx.envio.updateMany({
+        where: { id: { in: envioIds }, estado: 'EN_CUSTODIA' },
+        data: { estado: 'EN_DEVOLUCION', ordenDevolucionId: orden.id },
+      });
+      if (count !== envioIds.length) {
+        throw new Error('Los paquetes cambiaron mientras se armaba la orden');
+      }
       await tx.eventoEnvio.createMany({
         data: envioIds.map((envioId) => ({
           envioId,
           tipo: 'DEVOLUCION' as const,
-          // TODO(schema-F2): Agregar `estadoAnterior: 'EN_CUSTODIA', estadoNuevo: 'EN_DEVOLUCION'`.
+          estadoAnterior: 'EN_CUSTODIA' as const,
+          estadoNuevo: 'EN_DEVOLUCION' as const,
           detalle: DETALLE_EN_DEVOLUCION,
           actorTipo: 'OPERARIO' as const,
           actorId: operarioId,
-          creadoEn: ahora,
+        })),
+      });
+      // El motor ofrece la orden a través de su primer paquete (ver AsignacionRepository).
+      return { orden, representanteId: Math.min(...envioIds) };
+    });
+  }
+
+  // HU 39: la orden que el repartidor está llevando al comercio, si tiene una.
+  buscarOrdenActivaPorRepartidor(repartidorId: number) {
+    return this.prisma.ordenDevolucion.findFirst({
+      where: { repartidorId, confirmadaEn: null },
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        comercio: {
+          select: { nombre: true, direccion: true, telefono: true },
+        },
+        envios: {
+          where: { estado: 'EN_DEVOLUCION' },
+          orderBy: { id: 'asc' },
+          select: { id: true, codigoSeguimiento: true, tamanio: true },
+        },
+      },
+    });
+  }
+
+  // HU 39: el comercio recibió los paquetes. Todos pasan a "Devuelto al comercio" (estado
+  // final), la constancia queda en la orden y el repartidor se libera como al entregar.
+  confirmarDevolucion(ordenId: number, repartidorId: number, foto: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const { count: ordenes } = await tx.ordenDevolucion.updateMany({
+        where: { id: ordenId, repartidorId, confirmadaEn: null },
+        data: { confirmadaEn: new Date(), fotoConstanciaUrl: foto },
+      });
+      if (ordenes === 0) return false;
+
+      const envios = await tx.envio.findMany({
+        where: { ordenDevolucionId: ordenId, estado: 'EN_DEVOLUCION' },
+        select: { id: true },
+      });
+      await tx.envio.updateMany({
+        where: { id: { in: envios.map((envio) => envio.id) } },
+        data: { estado: 'DEVUELTO_AL_COMERCIO' },
+      });
+      await tx.eventoEnvio.createMany({
+        data: envios.map((envio) => ({
+          envioId: envio.id,
+          tipo: 'DEVOLUCION' as const,
+          estadoAnterior: 'EN_DEVOLUCION' as const,
+          estadoNuevo: 'DEVUELTO_AL_COMERCIO' as const,
+          detalle: DETALLE_DEVUELTO_AL_COMERCIO,
+          actorTipo: 'REPARTIDOR' as const,
+          actorId: repartidorId,
         })),
       });
 
-      return ahora;
-    });
-  }
-
-  // HU39: Busca el envío en devolución asignado al repartidor logueado para confirmar
-  // su entrega de retorno en el comercio.
-  async buscarEnvioEnDevolucionPorRepartidor(repartidorId: number) {
-    return this.prisma.envio.findFirst({
-      where: {
-        repartidorId,
-        eventos: {
-          some: { detalle: DETALLE_EN_DEVOLUCION },
-        },
-      },
-      orderBy: { actualizadoEn: 'desc' },
-      omit: { fotoUrl: true },
-      include: {
-        comercio: { select: { id: true, nombre: true, direccion: true } },
-        eventos: { orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }] },
-      },
-    });
-  }
-
-  // HU39 (Escenario 1): Registra la constancia fotográfica de recepción del comercio,
-  // pasa el envío a su estado final "Devuelto al comercio", crea el evento para avisar
-  // al operario y libera al repartidor al final de la cola FIFO.
-  async confirmarDevolucionAlComercio(
-    envioId: number,
-    repartidorId: number,
-    fotoUrl: string,
-  ): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.envio.update({
-        where: { id: envioId },
-        data: {
-          fotoUrl,
-          // TODO(schema-F2): Cuando Salvador agregue `DEVUELTO_AL_COMERCIO` al enum `EstadoEnvio`:
-          // estado: 'DEVUELTO_AL_COMERCIO',
-        },
-      });
-
-      await tx.eventoEnvio.create({
-        data: {
-          envioId,
-          tipo: 'DEVOLUCION',
-          // TODO(schema-F2): Pasar `estadoNuevo: 'DEVUELTO_AL_COMERCIO'` cuando exista en el enum.
-          detalle: DETALLE_DEVUELTO_AL_COMERCIO,
-          actorTipo: 'REPARTIDOR',
-          actorId: repartidorId,
-        },
-      });
-
-      await this.liberarRepartidor(tx, repartidorId, {
+      await this.enviosRepository.liberarRepartidor(tx, repartidorId, {
         viajesConsecutivos: { increment: 1 },
       });
-
       return true;
     });
   }
+}
 
-  // Misma regla que EnviosRepository.liberarRepartidor (G-1): si el repartidor había
-  // solicitado el cierre de jornada, pasa a ESPERANDO_VALIDACION_CIERRE; si no, vuelve
-  // a DISPONIBLE al final de la cola FIFO.
-  private async liberarRepartidor(
-    tx: Prisma.TransactionClient,
-    repartidorId: number,
-    extra: Prisma.RepartidorUpdateManyMutationInput = {},
-  ) {
-    await tx.repartidor.updateMany({
-      where: { id: repartidorId, estado: 'OCUPADO', cierreSolicitado: true },
-      data: { estado: 'ESPERANDO_VALIDACION_CIERRE', enColaDesde: null },
-    });
-    await tx.repartidor.updateMany({
-      where: { id: repartidorId, estado: 'OCUPADO' },
-      data: { estado: 'DISPONIBLE', enColaDesde: new Date(), ...extra },
-    });
-  }
+function vehiculoMasGrande(vehiculos: TipoVehiculo[]): TipoVehiculo {
+  return vehiculos.reduce((mayor, vehiculo) =>
+    VEHICULOS_DE_MENOR_A_MAYOR.indexOf(vehiculo) >
+    VEHICULOS_DE_MENOR_A_MAYOR.indexOf(mayor)
+      ? vehiculo
+      : mayor,
+  );
 }

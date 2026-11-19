@@ -10,14 +10,9 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import {
-  Roles,
-  UsuarioActual,
-  type UsuarioAutenticado,
-} from '../../common/auth';
+import { Roles } from '../../common/auth';
 import {
   ActualizarRepartidorDto,
-  AprobarCierreDto,
   CrearRepartidorDto,
   FiltroHistorialRespuestasDto,
   FiltroRepartidoresDto,
@@ -98,11 +93,7 @@ export class RepartidoresController {
 
   @Post(':id/aprobar-cierre')
   @HttpCode(200)
-  aprobarCierre(
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: AprobarCierreDto,
-    @UsuarioActual() operario: UsuarioAutenticado,
-  ) {
-    return this.jornadaService.aprobarCierre(id, dto, operario.id);
+  aprobarCierre(@Param('id', ParseIntPipe) id: number) {
+    return this.jornadaService.aprobarCierre(id);
   }
 }

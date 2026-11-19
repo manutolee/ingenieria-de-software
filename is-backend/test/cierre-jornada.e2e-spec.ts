@@ -29,11 +29,21 @@ describe('Cierre de jornada (e2e)', () => {
       [metodo](`/api/repartidor/${ruta}`)
       .set('Cookie', await cookieDe(id, 'REPARTIDOR'));
 
-  const aprobar = async (repartidorId: number, paquetesDevueltos: number) =>
+  const aprobar = async (repartidorId: number) =>
     request(app.getHttpServer())
       .post(`/api/repartidores/${repartidorId}/aprobar-cierre`)
+      .set('Cookie', await cookieDe(operarioId, 'OPERARIO'));
+
+  // HU 37: el operario recibe el paquete en la base escaneando su código.
+  const reingresar = async (repartidorId: number, envioId: number) => {
+    const { codigoSeguimiento } = await prisma.envio.findUniqueOrThrow({
+      where: { id: envioId },
+    });
+    return request(app.getHttpServer())
+      .post('/api/envios/deposito/reingreso')
       .set('Cookie', await cookieDe(operarioId, 'OPERARIO'))
-      .send({ paquetesDevueltos });
+      .send({ repartidorId, codigoSeguimiento });
+  };
 
   const estadoDe = async (id: number) =>
     (await prisma.repartidor.findUniqueOrThrow({ where: { id } })).estado;
@@ -146,44 +156,35 @@ describe('Cierre de jornada (e2e)', () => {
     );
   });
 
-  it('un paquete cancelado después del retiro se rinde en la base antes de aprobar el cierre', async () => {
+  it('un paquete a devolver se reingresa al depósito antes de aprobar el cierre', async () => {
     const repartidor = await crearRepartidor('DISPONIBLE');
-    const envio = await crearViaje(repartidor, 'RETIRADO');
-    await prisma.envio.update({
-      where: { id: envio },
-      data: { estado: 'CANCELADO' },
-    });
+    const envio = await crearViaje(repartidor, 'A_DEVOLVER');
     await comoRepartidor(repartidor, 'post', 'jornada/solicitar-cierre');
     expect(await estadoDe(repartidor)).toBe('ESPERANDO_VALIDACION_CIERRE');
 
     const jornada = await comoRepartidor(repartidor, 'get', 'jornada');
     expect(jornada.body.paquetesADevolver).toHaveLength(1);
 
-    const faltan = await aprobar(repartidor, 0);
+    const faltan = await aprobar(repartidor);
     expect(faltan.status).toBe(400);
     expect(faltan.body.message).toBe('Faltan rendir 1 paquete');
     expect(await estadoDe(repartidor)).toBe('ESPERANDO_VALIDACION_CIERRE');
 
-    await aprobar(repartidor, 1).then((r) => expect(r.status).toBe(200));
+    await reingresar(repartidor, envio).then((r) => expect(r.status).toBe(200));
+    expect(
+      await prisma.envio.findUniqueOrThrow({ where: { id: envio } }),
+    ).toMatchObject({ estado: 'EN_CUSTODIA', repartidorId: null });
+
+    await aprobar(repartidor).then((r) => expect(r.status).toBe(200));
     expect(await estadoDe(repartidor)).toBe('FUERA_DE_JORNADA');
-    const devolucion = await prisma.eventoEnvio.findFirst({
-      where: { envioId: envio, tipo: 'DEVOLUCION' },
-    });
-    expect(devolucion).toMatchObject({
-      actorTipo: 'OPERARIO',
-      actorId: operarioId,
-    });
   });
 
   it('un paquete ya rendido no vuelve a aparecer en el cierre de la jornada siguiente', async () => {
     const repartidor = await crearRepartidor('DISPONIBLE');
-    const envio = await crearViaje(repartidor, 'RETIRADO');
-    await prisma.envio.update({
-      where: { id: envio },
-      data: { estado: 'CANCELADO' },
-    });
+    const envio = await crearViaje(repartidor, 'A_DEVOLVER');
     await comoRepartidor(repartidor, 'post', 'jornada/solicitar-cierre');
-    await aprobar(repartidor, 1).then((r) => expect(r.status).toBe(200));
+    await reingresar(repartidor, envio).then((r) => expect(r.status).toBe(200));
+    await aprobar(repartidor).then((r) => expect(r.status).toBe(200));
 
     await comoRepartidor(repartidor, 'post', 'jornada/iniciar');
     const pedido = await comoRepartidor(
@@ -196,13 +197,13 @@ describe('Cierre de jornada (e2e)', () => {
       estado: 'ESPERANDO_VALIDACION_CIERRE',
       paquetesADevolver: [],
     });
-    await aprobar(repartidor, 0).then((r) => expect(r.status).toBe(200));
+    await aprobar(repartidor).then((r) => expect(r.status).toBe(200));
   });
 
   it('no aprueba el cierre de un repartidor que no lo pidió', async () => {
     const repartidor = await crearRepartidor('DISPONIBLE');
 
-    const respuesta = await aprobar(repartidor, 0);
+    const respuesta = await aprobar(repartidor);
 
     expect(respuesta.status).toBe(409);
     expect(await estadoDe(repartidor)).toBe('DISPONIBLE');

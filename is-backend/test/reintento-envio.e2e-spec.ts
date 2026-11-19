@@ -272,7 +272,7 @@ describe('Reintento de envío ante novedades (HU 24, e2e)', () => {
     expect(viajeActual.id).not.toBe(reintento.id);
   });
 
-  it('marca A_DEVOLVER y lo incluye en la rendición que se aprueba al cierre', async () => {
+  it('marca A_DEVOLVER, lo incluye en la rendición y se reingresa al depósito al cierre', async () => {
     const repartidor = await crearRepartidor('DISPONIBLE');
     const envio = await crearEnvio('CON_NOVEDAD', repartidor.id);
 
@@ -302,22 +302,20 @@ describe('Reintento de envío ante novedades (HU 24, e2e)', () => {
       ]),
     );
 
+    await comoOperario(operarioId, 'post', 'envios/deposito/reingreso')
+      .send({
+        repartidorId: repartidor.id,
+        codigoSeguimiento: envio.codigoSeguimiento,
+      })
+      .expect(200);
     await comoOperario(
       operarioId,
       'post',
       `repartidores/${repartidor.id}/aprobar-cierre`,
-    )
-      .send({ paquetesDevueltos: 1 })
-      .expect(200);
+    ).expect(200);
     expect(
-      await prisma.eventoEnvio.findFirstOrThrow({
-        where: { envioId: envio.id, tipo: 'DEVOLUCION' },
-      }),
-    ).toMatchObject({
-      detalle: 'Paquete devuelto en la base',
-      actorTipo: 'OPERARIO',
-      actorId: operarioId,
-    });
+      await prisma.envio.findUniqueOrThrow({ where: { id: envio.id } }),
+    ).toMatchObject({ estado: 'EN_CUSTODIA' });
   });
 
   it('rechaza reintento y devolución si el envío no está CON_NOVEDAD', async () => {

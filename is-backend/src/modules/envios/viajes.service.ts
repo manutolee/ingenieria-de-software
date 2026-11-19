@@ -7,7 +7,6 @@ import {
 import { AsignacionService } from '../asignacion/asignacion.service';
 import { DepositoRepository } from './deposito.repository';
 import { inicioDelDia } from './domain/dia';
-import { obtenerEtapaDeposito } from './domain/deposito';
 import { esTransicionValida, siguienteEstado } from './domain/estado-envio';
 import { AvanzarViajeDto } from './dto/avanzar-viaje.dto';
 import { ConfirmarDevolucionDto } from './dto/confirmar-devolucion.dto';
@@ -37,38 +36,36 @@ export class ViajesService {
     const envio =
       await this.enviosRepository.buscarViajeActivoPorRepartidor(repartidorId);
     if (!envio) {
-      // HU39: Si no tiene un viaje de entrega común, verificamos si tiene asignada una
-      // devolución hacia el comercio de origen ("En devolución").
-      const devolucion =
-        await this.depositoRepository?.buscarEnvioEnDevolucionPorRepartidor(
+      // HU 39: sin un viaje de entrega, puede estar llevando una orden de devolución.
+      const orden =
+        await this.depositoRepository?.buscarOrdenActivaPorRepartidor(
           repartidorId,
         );
-      if (
-        devolucion &&
-        obtenerEtapaDeposito(devolucion.estado, devolucion.eventos) ===
-          'EN_DEVOLUCION'
-      ) {
+      if (orden) {
+        const cantidad = orden.envios.length;
         return {
           viaje: {
-            envioId: devolucion.id,
-            codigoSeguimiento: devolucion.codigoSeguimiento,
-            estado: devolucion.estado,
+            envioId: orden.envios[0]?.id ?? null,
+            codigoSeguimiento: orden.envios[0]?.codigoSeguimiento ?? null,
+            estado: 'EN_DEVOLUCION' as const,
             siguienteEstado: null,
             esDevolucion: true,
+            ordenId: orden.id,
+            paquetes: orden.envios.map((paquete) => paquete.codigoSeguimiento),
             comercio: {
-              nombre: devolucion.comercio.nombre,
-              telefono: '',
+              nombre: orden.comercio.nombre,
+              telefono: orden.comercio.telefono,
             },
-            origenDireccion: 'Depósito central',
-            destinoDireccion: devolucion.comercio.direccion,
+            origenDireccion: 'Depósito (base)',
+            destinoDireccion: orden.comercio.direccion,
             origen: null,
-            destino: punto(devolucion.origenLat, devolucion.origenLon),
+            destino: null,
             destinatario: {
-              nombre: devolucion.comercio.nombre,
+              nombre: orden.comercio.nombre,
               apellido: null,
-              telefono: null,
+              telefono: orden.comercio.telefono,
             },
-            observaciones: 'Devolución de paquete al comercio de origen',
+            observaciones: `Devolución al comercio: ${cantidad} ${cantidad === 1 ? 'paquete' : 'paquetes'}`,
             requiereFoto: true,
             requiereDni: false,
             aviso: null,
@@ -187,53 +184,45 @@ export class ViajesService {
     return { estado: nuevo, siguienteEstado: siguienteEstado(nuevo) };
   }
 
-  // HU39: Confirmar la devolución de un paquete en el comercio de origen.
-  // Reglas:
-  // 1. Exige siempre la foto de la constancia de recepción del comercio (Escenario 2).
-  // 2. Cambia el envío al estado final "Devuelto al comercio", registra el evento para
-  //    avisar al operario y libera al repartidor en la cola FIFO (Escenario 1).
+  // HU 39: el repartidor entrega en el comercio todos los paquetes de su orden de
+  // devolución. Exige la foto de la constancia de recepción (escenario 2).
   async confirmarDevolucionActual(
     repartidorId: number,
     dto: ConfirmarDevolucionDto = {},
   ) {
-    // Escenario 2: Confirmación fallida sin constancia.
     if (!dto.foto || !dto.foto.trim()) {
       throw new BadRequestException('Falta la foto de la constancia');
     }
 
-    if (!this.depositoRepository) {
-      throw new ConflictException(
-        'No tenés ninguna devolución activa para confirmar',
-      );
-    }
-
-    const envio =
-      await this.depositoRepository.buscarEnvioEnDevolucionPorRepartidor(
+    const orden =
+      await this.depositoRepository?.buscarOrdenActivaPorRepartidor(
         repartidorId,
       );
-    if (
-      !envio ||
-      obtenerEtapaDeposito(envio.estado, envio.eventos) !== 'EN_DEVOLUCION'
-    ) {
+    if (!orden || !this.depositoRepository) {
       throw new ConflictException(
         'No tenés ninguna devolución activa para confirmar',
       );
     }
 
-    await this.depositoRepository.confirmarDevolucionAlComercio(
-      envio.id,
+    const confirmada = await this.depositoRepository.confirmarDevolucion(
+      orden.id,
       repartidorId,
       dto.foto,
     );
+    if (!confirmada) {
+      throw new ConflictException(
+        'La devolución cambió mientras la confirmabas. Actualizá la pantalla.',
+      );
+    }
 
-    // El repartidor terminó el viaje de devolución y volvió al final de la cola FIFO.
+    // Quedó libre (o con un reintento pendiente): el motor le puede ofrecer otro viaje.
     await this.asignacionService.reintentarPendientes();
 
     return {
-      envioId: envio.id,
-      codigoSeguimiento: envio.codigoSeguimiento,
+      ordenId: orden.id,
       estado: 'DEVUELTO_AL_COMERCIO' as const,
-      avisoOperario: `Devolución confirmada en ${envio.comercio.nombre}`,
+      cantidadPaquetes: orden.envios.length,
+      mensaje: `Devolución confirmada en ${orden.comercio.nombre}`,
     };
   }
 

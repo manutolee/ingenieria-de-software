@@ -224,20 +224,7 @@ export class EnviosRepository {
   async obtenerEstado(id: number) {
     return this.prisma.envio.findUnique({
       where: { id },
-      select: {
-        id: true,
-        estado: true,
-        eventos: {
-          where: { tipo: 'DEVOLUCION' },
-          select: {
-            tipo: true,
-            estadoNuevo: true,
-            detalle: true,
-            creadoEn: true,
-          },
-          orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }],
-        },
-      },
+      select: { id: true, estado: true },
     });
   }
 
@@ -1031,8 +1018,9 @@ export class EnviosRepository {
 
   // El repartidor terminó su viaje, o se lo sacaron (cancelación o cambio de vehículo). Si
   // había pedido cerrar la jornada (G-1), pasa a esperar la validación del operario en vez
-  // de volver a la cola, así no le llegan más ofertas.
-  private async liberarRepartidor(
+  // de volver a la cola, así no le llegan más ofertas. Público para que el depósito lo use
+  // al confirmar una devolución (HU 39) dentro de su propia transacción.
+  async liberarRepartidor(
     tx: Prisma.TransactionClient,
     repartidorId: number,
     extra: Prisma.RepartidorUpdateManyMutationInput = {},

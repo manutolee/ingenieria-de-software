@@ -2,163 +2,109 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AsignacionService } from '../asignacion/asignacion.service';
 import { ComerciosService } from '../comercios/comercios.service';
 import { DepositoRepository } from './deposito.repository';
 import {
-  ESTADO_FUTURO_A_DEVOLVER,
   calcularHorasEnCustodia,
-  obtenerEtapaDeposito,
-  obtenerFechaReingresoCustodia,
   requiereAlertaDemoraCustodia,
 } from './domain/deposito';
+import { esTransicionValida } from './domain/estado-envio';
 import type { CrearOrdenDevolucionDto } from './dto/crear-orden-devolucion.dto';
 import type { ReingresoDepositoDto } from './dto/reingreso-deposito.dto';
 
-// ============================================================================
-// SERVICE DE DEPÓSITO Y DEVOLUCIONES (HU37, HU38 y HU40)
-// ============================================================================
-// Contiene todas las reglas de negocio del depósito sin conocer HTTP ni SQL.
-//
-// GUÍA DE INGENIERÍA INVERSA (Para revisar con Salvador):
-// - HU37 (`registrarReingreso`): valida existencia del código, pertenencia a la
-//   jornada/rendición del repartidor y registra el ingreso a "En custodia".
-// - HU40 (`listarDevolucionesPendientesConAlerta`): filtra los paquetes que siguen
-//   "En custodia" (sin orden de devolución) y llevan >= 24 horas desde el reingreso.
-// - HU38 (`listarPaquetesEnCustodiaPorComercio` y `crearOrdenDevolucion`): ofrece solo
-//   los paquetes "En custodia" que aún no están en otra orden, los pasa a "En devolución"
-//   y los envía a `AsignacionService.asignar(...)`.
-// ============================================================================
+// Reglas del depósito (HU 37, 38 y 40). La confirmación en el comercio (HU 39) es del
+// repartidor y está en ViajesService.
 @Injectable()
 export class DepositoService {
-  private readonly logger = new Logger(DepositoService.name);
-
   constructor(
     private readonly depositoRepository: DepositoRepository,
     private readonly comerciosService: ComerciosService,
     private readonly asignacionService: AsignacionService,
   ) {}
 
-  // HU37: Registrar el reingreso de un paquete no entregado al depósito.
+  // HU 37: el operario recibe en la base un paquete que el repartidor no pudo entregar. Se
+  // hace mientras el repartidor rinde su jornada (desde "Aprobar cierre").
   async registrarReingreso(dto: ReingresoDepositoDto, operarioId: number) {
     const envio = await this.depositoRepository.buscarPorCodigo(
       dto.codigoSeguimiento,
     );
-
-    // Escenario 3: Reingreso con código inexistente.
     if (!envio) {
       throw new NotFoundException('El código no corresponde a ningún envío');
     }
 
-    // Escenario 2: Reingreso fallido por paquete de otro repartidor o que no está en su rendición.
-    // Un paquete pertenece a la rendición del repartidor si:
-    // 1. Tiene asignado ese `repartidorId`.
-    // 2. Está pendiente de devolver en la base: sea con el futuro estado `A_DEVOLVER` (dev3)
-    //    o con la regla actual de G-1 (`CANCELADO` habiendo pasado por `RETIRADO`, o `CON_NOVEDAD`).
-    // 3. Todavía no fue reingresado a custodia.
-    const etapaActual = obtenerEtapaDeposito(envio.estado, envio.eventos);
-    const fueRetirado = envio.eventos.some(
-      (evento) => evento.estadoNuevo === 'RETIRADO',
-    );
-    const esDevolvibleEnRendicion =
-      (envio.estado as string) === ESTADO_FUTURO_A_DEVOLVER ||
-      (envio.estado as string) === 'CON_NOVEDAD' ||
-      (envio.estado === 'CANCELADO' && fueRetirado);
-
-    if (
-      envio.repartidorId !== dto.repartidorId ||
-      !esDevolvibleEnRendicion ||
-      etapaActual !== null
-    ) {
+    // Es de su rendición si lo tiene él y quedó para devolver: marcado "A devolver" o con una
+    // novedad que el operario no mandó a reintentar (mismo criterio que la lista de paquetes
+    // a devolver del cierre de jornada).
+    const esDeSuRendicion =
+      envio.repartidorId === dto.repartidorId &&
+      esTransicionValida(envio.estado, 'EN_CUSTODIA', 'OPERARIO') &&
+      !envio.reintentoPendiente;
+    if (!esDeSuRendicion) {
       throw new ConflictException(
         'El paquete no pertenece a la jornada de este repartidor',
       );
     }
 
-    // Escenario 1 y 4: Cambia el envío a "En custodia", lo quita de la rendición del repartidor
-    // y deja registrado el evento "En custodia" con fecha, hora y el nombre del operario.
-    const { fechaReingreso, operarioNombre } =
-      await this.depositoRepository.registrarReingresoCustodia(
-        envio.id,
-        operarioId,
+    const estadoRepartidor = await this.depositoRepository.estadoDelRepartidor(
+      dto.repartidorId,
+    );
+    if (estadoRepartidor !== 'ESPERANDO_VALIDACION_CIERRE') {
+      throw new ConflictException(
+        'El repartidor tiene que solicitar el cierre de jornada para rendir los paquetes',
       );
+    }
+
+    const reingreso = await this.depositoRepository.registrarReingresoCustodia(
+      envio.id,
+      envio.estado,
+      operarioId,
+    );
+    if (!reingreso) {
+      throw new ConflictException(
+        'El envío cambió mientras se registraba el reingreso. Actualizá la pantalla.',
+      );
+    }
 
     return {
       envioId: envio.id,
       codigoSeguimiento: envio.codigoSeguimiento,
       estado: 'EN_CUSTODIA' as const,
       comercio: envio.comercio,
-      fechaReingreso,
-      operarioNombre,
+      ...reingreso,
     };
   }
 
-  // HU40: Listar paquetes con 24 horas o más en custodia sin orden de devolución
-  // para la sección "Devoluciones pendientes" del panel del operario.
+  // HU 40: paquetes con 24 horas o más en custodia, los más demorados primero. Los que ya
+  // están en una orden de devolución no figuran: dejaron de estar en custodia.
   async listarDevolucionesPendientesConAlerta(ahora: Date = new Date()) {
-    const envios =
-      await this.depositoRepository.listarEnviosEnCircuitoDeposito();
-
-    const alertas = [];
-    for (const envio of envios) {
-      const etapa = obtenerEtapaDeposito(envio.estado, envio.eventos);
-      const fechaReingreso = obtenerFechaReingresoCustodia(envio.eventos);
-
-      if (
-        requiereAlertaDemoraCustodia(etapa, fechaReingreso, ahora) &&
-        fechaReingreso
-      ) {
-        alertas.push({
-          envioId: envio.id,
-          codigoSeguimiento: envio.codigoSeguimiento,
-          comercio: envio.comercio,
-          fechaReingreso,
-          horasEnCustodia: calcularHorasEnCustodia(fechaReingreso, ahora),
-        });
-      }
-    }
-
-    // Los más demorados primero.
-    return alertas.sort((a, b) => b.horasEnCustodia - a.horasEnCustodia);
+    const envios = await this.depositoRepository.listarEnCustodia();
+    return envios
+      .map((envio) => ({ envio, fechaReingreso: fechaDeReingreso(envio) }))
+      .filter(({ fechaReingreso }) =>
+        requiereAlertaDemoraCustodia(fechaReingreso, ahora),
+      )
+      .map(({ envio, fechaReingreso }) => ({
+        envioId: envio.id,
+        codigoSeguimiento: envio.codigoSeguimiento,
+        comercio: envio.comercio,
+        fechaReingreso,
+        horasEnCustodia: calcularHorasEnCustodia(fechaReingreso, ahora),
+      }))
+      .sort((a, b) => b.horasEnCustodia - a.horasEnCustodia);
   }
 
-  // HU38: Obtener los paquetes actualmente "En custodia" de un comercio que todavía
-  // NO fueron incluidos en otra orden de devolución (Escenario 3).
-  // Si el comercio no tiene paquetes en custodia disponibles, lanza el mensaje del Escenario 2.
+  // HU 38: paquetes de un comercio que se pueden incluir en una orden. Los que ya están en
+  // otra orden no aparecen porque dejaron de estar "En custodia" (escenario 3).
   async listarPaquetesEnCustodiaPorComercio(
     comercioId: number,
     ahora: Date = new Date(),
   ) {
     const comercio = await this.comerciosService.obtenerPorId(comercioId);
-    const envios =
-      await this.depositoRepository.listarEnviosEnCircuitoDeposito(comercioId);
-
-    // Escenario 3: Solo se ofrecen los que siguen en `EN_CUSTODIA` (los que ya pasaron a
-    // `EN_DEVOLUCION` en otra orden quedan excluidos).
-    const disponibles = envios
-      .filter(
-        (envio) =>
-          obtenerEtapaDeposito(envio.estado, envio.eventos) === 'EN_CUSTODIA',
-      )
-      .map((envio) => {
-        const fechaReingreso = obtenerFechaReingresoCustodia(envio.eventos);
-        return {
-          envioId: envio.id,
-          codigoSeguimiento: envio.codigoSeguimiento,
-          destinoOriginal: envio.destinoDireccion,
-          tamanio: envio.tamanio,
-          fechaReingreso,
-          horasEnCustodia: fechaReingreso
-            ? calcularHorasEnCustodia(fechaReingreso, ahora)
-            : 0,
-        };
-      });
-
-    // Escenario 2: Comercio sin paquetes en custodia.
-    if (disponibles.length === 0) {
+    const envios = await this.depositoRepository.listarEnCustodia(comercioId);
+    if (envios.length === 0) {
       throw new BadRequestException(
         'No hay paquetes en custodia para este comercio',
       );
@@ -170,52 +116,59 @@ export class DepositoService {
         nombre: comercio.nombre,
         direccion: comercio.direccion,
       },
-      paquetes: disponibles,
+      paquetes: envios.map((envio) => {
+        const fechaReingreso = fechaDeReingreso(envio);
+        return {
+          envioId: envio.id,
+          codigoSeguimiento: envio.codigoSeguimiento,
+          destinoOriginal: envio.destinoDireccion,
+          tamanio: envio.tamanio,
+          fechaReingreso,
+          horasEnCustodia: calcularHorasEnCustodia(fechaReingreso, ahora),
+        };
+      }),
     };
   }
 
-  // HU38: Agrupar por comercio los paquetes en custodia seleccionados, pasarlos a
-  // "En devolución" y enviar la orden a la asignación automática como un viaje más.
+  // HU 38: la orden vuelve al comercio en un solo viaje, que entra a la asignación
+  // automática como cualquier envío.
   async crearOrdenDevolucion(dto: CrearOrdenDevolucionDto, operarioId: number) {
     const { comercio, paquetes } =
       await this.listarPaquetesEnCustodiaPorComercio(dto.comercioId);
 
-    const idsDisponibles = new Set(paquetes.map((paquete) => paquete.envioId));
-    const invalidos = dto.envioIds.filter((id) => !idsDisponibles.has(id));
-    if (invalidos.length > 0) {
+    const enCustodia = new Set(paquetes.map((paquete) => paquete.envioId));
+    if (dto.envioIds.some((id) => !enCustodia.has(id))) {
       throw new ConflictException(
         'Uno o más paquetes seleccionados no están en custodia para este comercio o ya fueron incluidos en otra orden',
       );
     }
 
-    const creadaEn = await this.depositoRepository.crearOrdenDevolucion(
+    const creada = await this.depositoRepository.crearOrdenDevolucion(
+      dto.comercioId,
       dto.envioIds,
       operarioId,
     );
-
-    // La orden entra a la asignación automática como un viaje más (Regla 2 de HU38).
-    // Se dispara el motor para cada paquete de la orden (o para el viaje de la orden).
-    for (const envioId of dto.envioIds) {
-      try {
-        await this.asignacionService.asignar(envioId);
-      } catch (error) {
-        this.logger.error(
-          `No se pudo asignar automáticamente la devolución del envío ${envioId}`,
-          error,
-        );
-      }
+    if (!creada) {
+      throw new ConflictException(
+        'Los paquetes cambiaron mientras se armaba la orden. Actualizá la pantalla.',
+      );
     }
 
-    const paquetesIncluidos = paquetes.filter((p) =>
-      dto.envioIds.includes(p.envioId),
-    );
+    const oferta = await this.asignacionService.asignar(creada.representanteId);
 
     return {
+      ordenId: creada.orden.id,
       comercio,
       estado: 'EN_DEVOLUCION' as const,
-      creadaEn,
-      cantidadPaquetes: paquetesIncluidos.length,
-      paquetes: paquetesIncluidos,
+      creadaEn: creada.orden.creadaEn,
+      cantidadPaquetes: dto.envioIds.length,
+      paquetes: paquetes.filter((p) => dto.envioIds.includes(p.envioId)),
+      ofrecida: oferta !== null,
     };
   }
+}
+
+// Todo envío en custodia tiene su evento de reingreso; la fecha de alta es solo un respaldo.
+function fechaDeReingreso(envio: { eventos: { creadoEn: Date }[] }): Date {
+  return envio.eventos[0]?.creadoEn ?? new Date();
 }
