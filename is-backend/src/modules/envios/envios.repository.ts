@@ -44,6 +44,7 @@ export interface FiltrosListado {
   desde?: Date;
   hasta?: Date;
   q?: string;
+  orden?: 'registro' | 'actividad';
   saltar: number;
   tomar: number;
 }
@@ -152,7 +153,10 @@ export class EnviosRepository {
       this.prisma.envio.findMany({
         where,
         // El desempate por id evita que un envío aparezca en dos páginas.
-        orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
+        orderBy:
+          filtros.orden === 'actividad'
+            ? [{ actualizadoEn: 'desc' }, { id: 'desc' }]
+            : [{ creadoEn: 'desc' }, { id: 'desc' }],
         skip: filtros.saltar,
         take: filtros.tomar,
         // La foto pesa cientos de kb y el listado no la muestra: solo sale en el detalle.

@@ -152,6 +152,7 @@ export class EnviosService {
       desde,
       hasta,
       q: filtros.q?.trim() || undefined,
+      orden: filtros.orden,
       saltar: (pagina - 1) * limite,
       tomar: limite,
     });
