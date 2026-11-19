@@ -274,6 +274,7 @@ describe('Depósito y devoluciones (HU 37, 38, 39 y 40)', () => {
 
     it('escenario 3: no se puede cancelar un envío devuelto al comercio', async () => {
       enviosRepository.obtenerEstado.mockResolvedValue({
+        _count: { eventos: 0 },
         id: 1,
         estado: 'DEVUELTO_AL_COMERCIO',
       });

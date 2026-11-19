@@ -23,6 +23,9 @@ const ESTADOS_VIAJE_ACTIVO: EstadoEnvio[] = [
   'EN_DOMICILIO',
 ];
 
+// Cuánto tiempo ve el repartidor el aviso de un viaje cancelado (HU 30).
+const VIGENCIA_AVISO_CANCELACION_MS = 30 * 60 * 1000;
+
 const ETIQUETA_TAMANIO: Record<TamanioPaquete, string> = {
   CHICO: 'Chico',
   MEDIANO: 'Mediano',
@@ -224,7 +227,12 @@ export class EnviosRepository {
   async obtenerEstado(id: number) {
     return this.prisma.envio.findUnique({
       where: { id },
-      select: { id: true, estado: true },
+      select: {
+        id: true,
+        estado: true,
+        // Si alguna vez se retiró, el paquete ya no está en el comercio (HU 30).
+        _count: { select: { eventos: { where: { estadoNuevo: 'RETIRADO' } } } },
+      },
     });
   }
 
@@ -253,11 +261,11 @@ export class EnviosRepository {
         FROM repartidores
         WHERE id = ${referencia.repartidorId}
         FOR UPDATE`;
-      if (
-        !repartidor ||
-        (repartidor.estado !== 'DISPONIBLE' && repartidor.estado !== 'OCUPADO')
-      ) {
-        return null;
+      if (!repartidor) return null;
+      // El paquete lo tiene un repartidor que no está trabajando (en pausa, en emergencia o
+      // rindiendo la jornada): no se le puede asignar el reintento.
+      if (repartidor.estado !== 'DISPONIBLE' && repartidor.estado !== 'OCUPADO') {
+        return 'REPARTIDOR_NO_DISPONIBLE' as const;
       }
 
       const [envio] = await tx.$queryRaw<
@@ -327,11 +335,16 @@ export class EnviosRepository {
             ? null
             : envio.destinoLon;
 
+      // HU 70: el paquete sale de nuevo desde donde lo dejó el intento anterior (la vieja
+      // dirección de entrega), no desde el comercio. La franja se recalcula con esa ruta.
       await tx.envio.update({
         where: { id },
         data: {
           estado: asignadoAhora ? 'RETIRADO' : 'CON_NOVEDAD',
           reintentoPendiente: !asignadoAhora,
+          origenDireccion: envio.destinoDireccion,
+          origenLat: envio.destinoLat,
+          origenLon: envio.destinoLon,
           destinoDireccion: direccion,
           destinoLat,
           destinoLon,
@@ -487,36 +500,29 @@ export class EnviosRepository {
     });
   }
 
+  // HU 30: aviso de que le cancelaron el viaje. Se muestra un rato después de la cancelación
+  // y hasta que recibe otra oferta: no puede quedar en su pantalla para siempre.
   async buscarAvisoCancelacionPorRepartidor(
     repartidorId: number,
+    ahora: Date = new Date(),
   ): Promise<string | null> {
-    const envio = await this.prisma.envio.findFirst({
+    const evento = await this.prisma.eventoEnvio.findFirst({
       where: {
-        repartidorId,
-        estado: 'CANCELADO',
-        eventos: {
-          some: {
-            tipo: 'CAMBIO_ESTADO',
-            estadoNuevo: 'CANCELADO',
-            detalle: AVISO_CANCELACION_REPARTIDOR,
-          },
-        },
+        tipo: 'CAMBIO_ESTADO',
+        estadoNuevo: 'CANCELADO',
+        detalle: AVISO_CANCELACION_REPARTIDOR,
+        creadoEn: { gte: new Date(ahora.getTime() - VIGENCIA_AVISO_CANCELACION_MS) },
+        envio: { repartidorId, estado: 'CANCELADO' },
       },
-      orderBy: [{ actualizadoEn: 'desc' }, { id: 'desc' }],
-      select: {
-        eventos: {
-          where: {
-            tipo: 'CAMBIO_ESTADO',
-            estadoNuevo: 'CANCELADO',
-            detalle: AVISO_CANCELACION_REPARTIDOR,
-          },
-          orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
-          take: 1,
-          select: { detalle: true },
-        },
-      },
+      orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
+      select: { detalle: true, creadoEn: true },
     });
-    return envio?.eventos[0]?.detalle ?? null;
+    if (!evento) return null;
+
+    const ofertasPosteriores = await this.prisma.oferta.count({
+      where: { repartidorId, creadaEn: { gt: evento.creadoEn } },
+    });
+    return ofertasPosteriores === 0 ? evento.detalle : null;
   }
 
   // Historial del día del repartidor (HU 34): solo envíos ENTREGADOS cuya entrega fue desde `desde`.
@@ -1007,10 +1013,17 @@ export class EnviosRepository {
         tamanio: true,
         comercio: { select: { nombre: true } },
         repartidor: { select: { nombre: true, apellido: true } },
-        // Igual que en el listado: alcanza para el aviso de asignación por excepción (HU10).
+        // El aviso de asignación por excepción (HU 10) y las novedades que reportó el
+        // repartidor (HU 23), para mostrar el motivo en la tarjeta del envío con novedad.
         eventos: {
-          where: { detalle: AVISO_ASIGNACION_EXCEPCION },
-          select: { id: true, detalle: true },
+          where: {
+            OR: [
+              { detalle: AVISO_ASIGNACION_EXCEPCION },
+              { tipo: 'NOVEDAD', actorTipo: 'REPARTIDOR' },
+            ],
+          },
+          orderBy: [{ creadoEn: 'asc' }, { id: 'asc' }],
+          select: { id: true, tipo: true, detalle: true },
         },
       },
     });

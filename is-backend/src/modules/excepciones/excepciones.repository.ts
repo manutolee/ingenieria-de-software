@@ -57,6 +57,7 @@ export class ExcepcionesRepository {
         vehiculoRequerido: true,
         estado: true,
         comercio: { select: { nombre: true } },
+        _count: { select: { eventos: { where: { estadoNuevo: 'RETIRADO' } } } },
         // La PRIMERA oferta que venció: desde ahí espera el envío. Si se tomara la última,
         // cada asignación manual que vence lo haría "rejuvenecer" y bajar en el panel.
         ofertas: {
@@ -95,6 +96,7 @@ export class ExcepcionesRepository {
         vehiculoRequerido: true,
         estado: true,
         comercio: { select: { nombre: true } },
+        _count: { select: { eventos: { where: { estadoNuevo: 'RETIRADO' } } } },
         eventos: {
           where: { tipo: 'INCIDENTE' },
           orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],

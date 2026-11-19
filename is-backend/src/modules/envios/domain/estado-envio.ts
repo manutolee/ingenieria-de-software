@@ -37,10 +37,13 @@ const ESTADOS_VIAJE_INTERRUMPIBLES: readonly EstadoEnvio[] = [
   'EN_DOMICILIO',
 ];
 
+// Además, el paquete nunca tiene que haber salido del comercio (lo verifica el service:
+// tras un incidente en ruta un envío vuelve a PENDIENTE con el paquete en la calle).
 const ESTADOS_CANCELABLES: readonly EstadoEnvio[] = [
   'PENDIENTE',
   'ASIGNADO',
   'EN_CAMINO_A_RETIRAR',
+  'PARADO',
 ];
 
 export function esTransicionValida(

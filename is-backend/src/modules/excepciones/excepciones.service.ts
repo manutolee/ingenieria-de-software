@@ -27,6 +27,8 @@ export type ExcepcionListada = {
   motivo: MotivoExcepcion;
   aviso: string;
   puedeAsignar: boolean;
+  // Con el paquete ya retirado no se cancela: se gestiona como devolución (HU 30).
+  puedeCancelar: boolean;
   esperaDesde: Date;
   minutosEspera: number;
 };
@@ -59,6 +61,7 @@ export class ExcepcionesService {
         motivo: 'SIN_REPARTIDOR',
         aviso: AVISO_MOTIVO.SIN_REPARTIDOR,
         puedeAsignar: true,
+        puedeCancelar: envio._count.eventos === 0,
         esperaDesde,
         minutosEspera: minutosDeEspera(esperaDesde, ahora),
       });
@@ -84,6 +87,11 @@ export class ExcepcionesService {
         puedeAsignar:
           parado ||
           (envio.estado === 'PENDIENTE' && envio.ofertas.length === 0),
+        puedeCancelar:
+          envio._count.eventos === 0 &&
+          ['PENDIENTE', 'ASIGNADO', 'EN_CAMINO_A_RETIRAR', 'PARADO'].includes(
+            envio.estado,
+          ),
         esperaDesde: incidente.creadoEn,
         minutosEspera: minutosDeEspera(incidente.creadoEn, ahora),
       });

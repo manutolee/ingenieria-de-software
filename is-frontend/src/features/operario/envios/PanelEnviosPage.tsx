@@ -17,8 +17,8 @@ export interface EnvioPanelItem {
   tamanio: string
   comercio: { nombre: string }
   repartidor: { nombre: string; apellido: string } | null
-  // Solo trae el aviso de asignación por excepción, si lo hubo (HU10).
-  eventos: { id: number; detalle: string | null }[]
+  // El aviso de asignación por excepción (HU 10) y las novedades del repartidor (HU 23).
+  eventos: { id: number; tipo: string; detalle: string | null }[]
 }
 
 interface GrupoPanel {
@@ -247,6 +247,13 @@ export function PanelEnviosPage() {
                               {envio.tamanio}
                             </span>
                           </div>
+
+                          {/* HU 23: el operario ve el motivo y el comentario junto a la alerta. */}
+                          {envio.estado === 'CON_NOVEDAD' && (
+                            <p className="mt-2 rounded-md border border-rose-300 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-900">
+                              {envio.eventos.findLast((e) => e.tipo === 'NOVEDAD')?.detalle ?? 'Novedad en el domicilio'}
+                            </p>
+                          )}
 
                           {/* Mismo aviso y mismo criterio que en el listado de envíos (HU10). */}
                           {esAsignacionPorExcepcion(envio.estado, envio.eventos) && (

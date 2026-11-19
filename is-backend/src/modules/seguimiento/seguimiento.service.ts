@@ -9,6 +9,7 @@ import {
 import { MapasService } from '../mapas/mapas.service';
 import type { EstadoEnvio, TipoVehiculo } from '../../generated/prisma/client';
 import { DETALLE_REINTENTO } from '../envios/domain/reintento';
+import { ESTADOS_FINALES } from '../envios/domain/estado-envio';
 
 // Piso o departamento escritos sin coma: "Belgrano 456 piso 2 B".
 const PISO_O_DEPTO = /\s+(piso|dpto\.?|depto\.?|departamento|dto\.?)\b.*$/i;
@@ -112,9 +113,22 @@ export class SeguimientoService {
         ev.actorTipo === 'OPERARIO' &&
         ev.detalle === DETALLE_REINTENTO,
     );
-    const avisoReprogramacion = eventoReprogramado
-      ? 'Tu envío fue reprogramado'
-      : undefined;
+    // El aviso vale para el intento en curso: desaparece si el envío terminó o si hubo
+    // una novedad después de la reprogramación.
+    const huboNovedadDespues =
+      eventoReprogramado !== undefined &&
+      envio.eventos.some(
+        (ev) =>
+          ev.estadoNuevo === 'CON_NOVEDAD' &&
+          ev.tipo !== 'REASIGNACION' &&
+          ev.creadoEn > eventoReprogramado.creadoEn,
+      );
+    const avisoReprogramacion =
+      eventoReprogramado &&
+      !huboNovedadDespues &&
+      !ESTADOS_FINALES.includes(envio.estado)
+        ? 'Tu envío fue reprogramado'
+        : undefined;
 
     // Línea de tiempo de cambios de estado
     const historial: HistorialEstadoDto[] = envio.eventos

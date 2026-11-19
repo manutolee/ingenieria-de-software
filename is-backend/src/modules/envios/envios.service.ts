@@ -217,7 +217,10 @@ export class EnviosService {
     }
 
     // HU 30: con el paquete fuera del comercio ya no se cancela; se gestiona como devolución.
-    if (ESTADOS_CON_PAQUETE_RETIRADO.includes(envio.estado)) {
+    if (
+      ESTADOS_CON_PAQUETE_RETIRADO.includes(envio.estado) ||
+      (envio.estado !== 'CANCELADO' && envio._count.eventos > 0)
+    ) {
       throw new ConflictException(
         'No se puede cancelar: el paquete ya fue retirado',
       );
@@ -275,6 +278,11 @@ export class EnviosService {
       dto,
       operarioId,
     );
+    if (resultado === 'REPARTIDOR_NO_DISPONIBLE') {
+      throw new ConflictException(
+        'El repartidor que tiene el paquete no está disponible (en pausa, en emergencia o cerrando la jornada). Marcá el envío para devolución o esperá a que vuelva.',
+      );
+    }
     if (!resultado) {
       throw new ConflictException(
         'El envío o el repartidor cambió de estado. Actualizá el detalle e intentá nuevamente.',

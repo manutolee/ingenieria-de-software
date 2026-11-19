@@ -30,6 +30,7 @@ describe('ExcepcionesService', () => {
     vehiculoRequerido: 'MOTO',
     estado: 'PENDIENTE',
     comercio: { nombre: 'Kiosco' },
+    _count: { eventos: 0 },
     ofertas: [{ expiraEn: haceMinutos(vencioHace) }],
   });
 
