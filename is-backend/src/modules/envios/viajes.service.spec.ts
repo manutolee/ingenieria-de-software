@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import type { AsignacionService } from '../asignacion/asignacion.service';
+import { MotivoNovedadDomicilio } from './dto/reportar-novedad.dto';
 import type { EnviosRepository } from './envios.repository';
 import { ViajesService } from './viajes.service';
 
@@ -143,7 +144,7 @@ describe('ViajesService', () => {
 
     await expect(
       service.reportarNovedad(1, {
-        motivo: 'DIRECCION_INCORRECTA',
+        motivo: MotivoNovedadDomicilio.DIRECCION_INCORRECTA,
         comentario: 'El número no existe',
       }),
     ).resolves.toEqual({
@@ -151,7 +152,7 @@ describe('ViajesService', () => {
       mensaje: 'Novedad registrada. El operario decidirá cómo continuar.',
     });
     expect(repository.reportarNovedad).toHaveBeenCalledWith(1, {
-      motivo: 'DIRECCION_INCORRECTA',
+      motivo: MotivoNovedadDomicilio.DIRECCION_INCORRECTA,
       comentario: 'El número no existe',
     });
     expect(asignacion.reintentarPendientes).toHaveBeenCalled();
@@ -162,7 +163,7 @@ describe('ViajesService', () => {
       envioEn('RETIRADO'),
     );
     await expect(
-      service.reportarNovedad(1, { motivo: 'CLIENTE_AUSENTE' }),
+      service.reportarNovedad(1, { motivo: MotivoNovedadDomicilio.CLIENTE_AUSENTE }),
     ).rejects.toThrow('Solo podés reportar una novedad al llegar al domicilio');
     expect(repository.reportarNovedad).not.toHaveBeenCalled();
   });
