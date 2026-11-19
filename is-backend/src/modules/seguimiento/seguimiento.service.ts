@@ -8,6 +8,7 @@ import {
 } from './domain/franja-estimada';
 import { MapasService } from '../mapas/mapas.service';
 import type { EstadoEnvio, TipoVehiculo } from '../../generated/prisma/client';
+import { DETALLE_REINTENTO } from '../envios/domain/reintento';
 
 // Piso o departamento escritos sin coma: "Belgrano 456 piso 2 B".
 const PISO_O_DEPTO = /\s+(piso|dpto\.?|depto\.?|departamento|dto\.?)\b.*$/i;
@@ -104,6 +105,17 @@ export class SeguimientoService {
       ? eventoEntregado.creadoEn.toISOString()
       : undefined;
 
+    const eventoReprogramado = envio.eventos.findLast(
+      (ev) =>
+        ev.tipo === 'REASIGNACION' &&
+        ev.estadoAnterior === 'CON_NOVEDAD' &&
+        ev.actorTipo === 'OPERARIO' &&
+        ev.detalle === DETALLE_REINTENTO,
+    );
+    const avisoReprogramacion = eventoReprogramado
+      ? 'Tu envío fue reprogramado'
+      : undefined;
+
     // Línea de tiempo de cambios de estado
     const historial: HistorialEstadoDto[] = envio.eventos
       .filter((ev) => ev.estadoNuevo !== null)
@@ -133,6 +145,7 @@ export class SeguimientoService {
       franjaEstimadaInicio: franja?.inicio.toISOString(),
       franjaEstimadaFin: franja?.fin.toISOString(),
       fechaEntrega,
+      avisoReprogramacion,
       historial,
     };
   }

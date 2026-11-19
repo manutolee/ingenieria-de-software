@@ -41,6 +41,8 @@ enum EstadoEnvio {
   EN_DOMICILIO
   INTERRUMPIDO
   PARADO
+  CON_NOVEDAD
+  A_DEVOLVER
   ENTREGADO
   CANCELADO
 }
@@ -170,6 +172,8 @@ model Envio {
   // Minutos que se estima que tarda el viaje del retiro a la entrega (HU 70). Se calcula una
   // sola vez y se guarda: así la franja que ve el destinatario no cambia entre consultas.
   duracionEstimadaMin  Int?           @map("duracion_estimada_min")
+  // Indica que el operario pidió reintentar tras una novedad, pero el mismo repartidor aún está ocupado.
+  reintentoPendiente   Boolean        @default(false) @map("reintento_pendiente")
   estado               EstadoEnvio    @default(PENDIENTE)
   repartidorId         Int?           @map("repartidor_id")
   // Restrict: un repartidor con envíos no se puede borrar (las bajas son lógicas) y no se pierde el historial

@@ -7,6 +7,7 @@ import { Prisma, RolUsuario } from '../../generated/prisma/client';
 import { AsignacionService } from '../asignacion/asignacion.service';
 import { OfertasService } from '../asignacion/ofertas.service';
 import { AuthService } from '../auth/auth.service';
+import { EnviosService } from '../envios/envios.service';
 import type { Sesion } from '../auth/tipos';
 import {
   type ActualizarPerfilRepartidorDto,
@@ -38,6 +39,7 @@ export class RepartidoresService {
     private readonly authService: AuthService,
     private readonly asignacion: AsignacionService,
     private readonly ofertasService: OfertasService,
+    private readonly enviosService: EnviosService,
   ) {}
 
   async listar(filtros?: FiltroRepartidoresDto): Promise<RepartidorPublico[]> {
@@ -189,7 +191,7 @@ export class RepartidoresService {
     return { pin: nuevoPin };
   }
 
-  async rehabilitar(id: number): Promise<{ estado: 'DISPONIBLE' }> {
+  async rehabilitar(id: number): Promise<{ estado: 'DISPONIBLE' | 'OCUPADO' }> {
     const repartidor = await this.buscarPorId(id);
     if (
       repartidor.estado !== 'EMERGENCIA' &&
@@ -205,8 +207,10 @@ export class RepartidoresService {
         'El estado del repartidor cambió. Actualizá la flota e intentá de nuevo.',
       );
     }
+    const reintentoAsignado =
+      await this.enviosService.asignarReintentoPendiente(id);
     await this.asignacion.reintentarPendientes();
-    return { estado: 'DISPONIBLE' };
+    return { estado: reintentoAsignado ? 'OCUPADO' : 'DISPONIBLE' };
   }
 
   // Vuelve a habilitar a un repartidor dado de baja: es la única forma de que regrese, porque

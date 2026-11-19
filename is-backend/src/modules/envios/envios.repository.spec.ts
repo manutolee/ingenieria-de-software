@@ -24,8 +24,8 @@ describe('EnviosRepository.reportarIncidente', () => {
 
   it('actualiza el origen y pone al repartidor en emergencia si ya retiró el paquete', async () => {
     tx.$queryRaw
-      .mockResolvedValueOnce([{ id: 5, estado: 'RETIRADO' }])
-      .mockResolvedValueOnce([{ estado: 'OCUPADO' }]);
+      .mockResolvedValueOnce([{ estado: 'OCUPADO' }])
+      .mockResolvedValueOnce([{ id: 5, estado: 'RETIRADO' }]);
 
     await expect(
       repository.reportarIncidente(9, 'Calle 50 123'),
@@ -59,8 +59,8 @@ describe('EnviosRepository.reportarIncidente', () => {
 
   it('conserva el comercio como origen si todavía no retiró el paquete', async () => {
     tx.$queryRaw
-      .mockResolvedValueOnce([{ id: 5, estado: 'EN_CAMINO_A_RETIRAR' }])
-      .mockResolvedValueOnce([{ estado: 'OCUPADO' }]);
+      .mockResolvedValueOnce([{ estado: 'OCUPADO' }])
+      .mockResolvedValueOnce([{ id: 5, estado: 'EN_CAMINO_A_RETIRAR' }]);
 
     await repository.reportarIncidente(9, 'Calle 50 123');
 

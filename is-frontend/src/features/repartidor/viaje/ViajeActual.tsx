@@ -6,6 +6,7 @@ import { usePolling } from '../../../shared/usePolling.ts'
 
 // Lo que devuelve GET /api/repartidor/viajes/actual (E-2).
 type EstadoViaje = 'ASIGNADO' | 'EN_CAMINO_A_RETIRAR' | 'RETIRADO' | 'EN_DOMICILIO'
+type MotivoNovedad = 'CLIENTE_AUSENTE' | 'DIRECCION_INCORRECTA' | 'DEMORADO'
 
 type Viaje = {
   envioId: number
@@ -274,9 +275,12 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
   const [viaje, setViaje] = useState<Viaje | null | undefined>(undefined)
   const [confirmando, setConfirmando] = useState(false)
   const [confirmandoIncidente, setConfirmandoIncidente] = useState(false)
+  const [confirmandoNovedad, setConfirmandoNovedad] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
   const [ubicacionIncidente, setUbicacionIncidente] = useState('')
+  const [motivoNovedad, setMotivoNovedad] = useState<MotivoNovedad>('CLIENTE_AUSENTE')
+  const [comentarioNovedad, setComentarioNovedad] = useState('')
   const [dni, setDni] = useState('')
   const [foto, setFoto] = useState('')
   const envioDeLaEvidencia = useRef<number | null>(null)
@@ -380,6 +384,34 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
         error instanceof ErrorApi && (error.status === 400 || error.status === 409)
           ? error.message
           : 'No se pudo reportar el incidente. Probá de nuevo.',
+      )
+      void consultar().catch(() => undefined)
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  async function reportarNovedad() {
+    setEnviando(true)
+    setAviso(null)
+    try {
+      const respuesta = await api<{ mensaje: string }>('/repartidor/viajes/actual/novedad', {
+        metodo: 'POST',
+        datos: {
+          motivo: motivoNovedad,
+          comentario: comentarioNovedad.trim() || undefined,
+        },
+      })
+      setConfirmandoNovedad(false)
+      setComentarioNovedad('')
+      setViaje(null)
+      setAviso(respuesta.mensaje)
+      void consultar().catch(() => undefined)
+    } catch (error) {
+      setAviso(
+        error instanceof ErrorApi && (error.status === 400 || error.status === 409)
+          ? error.message
+          : 'No se pudo reportar la novedad. Probá de nuevo.',
       )
       void consultar().catch(() => undefined)
     } finally {
@@ -500,6 +532,37 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
             {enviando ? 'Confirmando…' : 'Confirmar devolución'}
           </BotonGrande>
         </div>
+      ) : confirmandoNovedad ? (
+        <div className="space-y-3 rounded-xl border border-orange-400/50 p-4">
+          <p className="text-center text-lg font-semibold">¿Qué pasó en el domicilio?</p>
+          <label className="block space-y-2">
+            <span className="block text-lg font-semibold text-yellow-200">Motivo</span>
+            <select
+              value={motivoNovedad}
+              onChange={(evento) => setMotivoNovedad(evento.target.value as MotivoNovedad)}
+              className="min-h-14 w-full rounded-xl bg-white px-4 text-lg font-semibold text-black"
+            >
+              <option value="CLIENTE_AUSENTE">Cliente ausente</option>
+              <option value="DIRECCION_INCORRECTA">Dirección incorrecta</option>
+              <option value="DEMORADO">Demorado</option>
+            </select>
+          </label>
+          <label className="block space-y-2">
+            <span className="block text-lg font-semibold text-yellow-200">Comentario (opcional)</span>
+            <input
+              value={comentarioNovedad}
+              onChange={(evento) => setComentarioNovedad(evento.target.value)}
+              maxLength={250}
+              className="min-h-14 w-full rounded-xl bg-white px-4 text-lg font-semibold text-black"
+            />
+          </label>
+          <BotonGrande onClick={() => void reportarNovedad()} disabled={enviando}>
+            {enviando ? 'Reportando…' : 'Confirmar novedad'}
+          </BotonGrande>
+          <BotonGrande variante="secundario" onClick={() => setConfirmandoNovedad(false)} disabled={enviando}>
+            Volver
+          </BotonGrande>
+        </div>
       ) : confirmandoIncidente ? (
         <div className="space-y-3 rounded-xl border border-red-500/50 p-4">
           <p className="text-center text-lg font-semibold" role="alert">
@@ -568,6 +631,18 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
           >
             Reportar incidente
           </BotonGrande>
+          {entregando && (
+            <BotonGrande
+              variante="secundario"
+              onClick={() => {
+                setConfirmando(false)
+                setConfirmandoNovedad(true)
+              }}
+              disabled={enviando}
+            >
+              Reportar novedad en domicilio
+            </BotonGrande>
+          )}
         </>
       )}
     </section>

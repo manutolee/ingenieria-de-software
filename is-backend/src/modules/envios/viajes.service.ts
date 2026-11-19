@@ -12,6 +12,7 @@ import { esTransicionValida, siguienteEstado } from './domain/estado-envio';
 import { AvanzarViajeDto } from './dto/avanzar-viaje.dto';
 import { ConfirmarDevolucionDto } from './dto/confirmar-devolucion.dto';
 import { ReportarIncidenteDto } from './dto/reportar-incidente.dto';
+import { ReportarNovedadDto } from './dto/reportar-novedad.dto';
 import { EnviosRepository } from './envios.repository';
 
 const punto = (lat: number | null, lon: number | null) =>
@@ -267,6 +268,35 @@ export class ViajesService {
       mensaje: oferta
         ? 'Incidente reportado. El envío se ofreció a otro repartidor.'
         : 'Incidente reportado. No hay repartidores compatibles; el envío quedó parado.',
+    };
+  }
+
+  async reportarNovedad(repartidorId: number, dto: ReportarNovedadDto) {
+    const envio =
+      await this.enviosRepository.buscarViajeActivoPorRepartidor(repartidorId);
+    if (
+      !envio ||
+      !esTransicionValida(envio.estado, 'CON_NOVEDAD', 'REPARTIDOR')
+    ) {
+      throw new ConflictException(
+        'Solo podés reportar una novedad al llegar al domicilio',
+      );
+    }
+
+    const registrada = await this.enviosRepository.reportarNovedad(
+      repartidorId,
+      dto,
+    );
+    if (!registrada) {
+      throw new ConflictException(
+        'El viaje cambió mientras reportabas la novedad. Actualizá la pantalla e intentá de nuevo.',
+      );
+    }
+
+    await this.asignacionService.reintentarPendientes();
+    return {
+      estado: 'CON_NOVEDAD' as const,
+      mensaje: 'Novedad registrada. El operario decidirá cómo continuar.',
     };
   }
 
