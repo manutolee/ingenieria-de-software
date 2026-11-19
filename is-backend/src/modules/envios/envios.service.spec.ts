@@ -774,7 +774,7 @@ describe('EnviosService', () => {
       eventos: [],
     });
 
-    it('pide al repository todo lo que no está en un estado final', async () => {
+    it('pide al repository todo lo que no está en un estado final ni en el depósito', async () => {
       repository.obtenerPanelEnvios.mockResolvedValue([]);
 
       await service.obtenerPanel();
@@ -783,6 +783,8 @@ describe('EnviosService', () => {
         'ENTREGADO',
         'CANCELADO',
         'DEVUELTO_AL_COMERCIO',
+        'EN_CUSTODIA',
+        'EN_DEVOLUCION',
       ]);
     });
 
@@ -813,8 +815,6 @@ describe('EnviosService', () => {
         { estado: 'PARADO', cantidad: 0, ids: [] },
         { estado: 'CON_NOVEDAD', cantidad: 0, ids: [] },
         { estado: 'A_DEVOLVER', cantidad: 0, ids: [] },
-        { estado: 'EN_CUSTODIA', cantidad: 0, ids: [] },
-        { estado: 'EN_DEVOLUCION', cantidad: 0, ids: [] },
       ]);
     });
 

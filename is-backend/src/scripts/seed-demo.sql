@@ -1,4 +1,4 @@
--- Datos de la Demo 1 (los mismos que `npm run db:seed:demo`, ver docs/guion-demo-1.md). ⚠️ BORRA TODO lo que hay en la base.
+-- Datos de las demos (los mismos que `npm run db:seed:demo`, ver docs/guion-demo-2.md). ⚠️ BORRA TODO lo que hay en la base.
 -- Antes de correrlo: reemplazar PEGAR_ACA_EL_PIN_SECRET por el PIN_SECRET de Render (Environment).
 -- No guardes la query con el secreto pegado.
 
@@ -118,6 +118,32 @@ begin
               case when camino[paso] = 'CANCELADO' then op_id else rep_id end, t);
     end loop;
   end loop;
+
+  -- HU 37-40: dos paquetes de Librería del Bosque que volvieron al depósito después de una
+  -- novedad. Uno lleva 26 horas en custodia (alerta de HU 40) y el otro, 3 horas.
+  select id, direccion, requiere_foto, requiere_dni into com from comercios where nombre = 'Librería del Bosque';
+  select id into rep_id from repartidores where nombre = 'Lucas';
+  for i in 1 .. 2 loop
+    t := (now() at time zone 'UTC') - make_interval(hours => case i when 1 then 26 else 3 end);
+    select string_agg(substr(alfabeto, 1 + floor(random() * 32)::int, 1), '') into codigo from generate_series(1, 10);
+    insert into envios (codigo_seguimiento, comercio_id, origen_direccion, destino_direccion, destinatario_nombre,
+                        destinatario_apellido, destinatario_telefono, tamanio, vehiculo_requerido,
+                        requiere_foto, requiere_dni, estado, creado_en, actualizado_en)
+    values (codigo, com.id, com.direccion, case i when 1 then 'Calle 13 1450' else 'Calle 49 720' end,
+            case i when 1 then 'Sergio' else 'Paula' end, case i when 1 then 'Ibáñez' else 'Ríos' end,
+            '221 600-09' || i, 'CHICO', 'MOTO', com.requiere_foto, com.requiere_dni, 'EN_CUSTODIA',
+            t - interval '180 minutes', now())
+    returning id into envio_id;
+    insert into eventos_envio (envio_id, tipo, estado_anterior, estado_nuevo, detalle, actor_tipo, actor_id, creado_en) values
+      (envio_id, 'CREADO', null, 'PENDIENTE', null, 'OPERARIO', op_id, t - interval '180 minutes'),
+      (envio_id, 'CAMBIO_ESTADO', 'PENDIENTE', 'ASIGNADO', null, 'REPARTIDOR', rep_id, t - interval '170 minutes'),
+      (envio_id, 'CAMBIO_ESTADO', 'ASIGNADO', 'EN_CAMINO_A_RETIRAR', null, 'REPARTIDOR', rep_id, t - interval '165 minutes'),
+      (envio_id, 'CAMBIO_ESTADO', 'EN_CAMINO_A_RETIRAR', 'RETIRADO', null, 'REPARTIDOR', rep_id, t - interval '150 minutes'),
+      (envio_id, 'CAMBIO_ESTADO', 'RETIRADO', 'EN_DOMICILIO', null, 'REPARTIDOR', rep_id, t - interval '130 minutes'),
+      (envio_id, 'NOVEDAD', 'EN_DOMICILIO', 'CON_NOVEDAD', 'Cliente ausente', 'REPARTIDOR', rep_id, t - interval '125 minutes'),
+      (envio_id, 'CAMBIO_ESTADO', 'CON_NOVEDAD', 'A_DEVOLVER', 'Marcado para devolución al comercio', 'OPERARIO', op_id, t - interval '110 minutes'),
+      (envio_id, 'DEVOLUCION', 'A_DEVOLVER', 'EN_CUSTODIA', 'En custodia', 'OPERARIO', op_id, t);
+  end loop;
 end $$;
 
 -- Resumen: PINs y códigos de seguimiento para tener a mano.
@@ -127,7 +153,7 @@ select 'Repartidor' as que, repeat(id::text, 4) as pin_o_codigo,
             when viajes_consecutivos >= 2 then ' — 2 viajes seguidos' else '' end as detalle
 from repartidores
 union all
-select 'Envío de ayer', e.codigo_seguimiento,
+select case when e.estado = 'EN_CUSTODIA' then 'En el depósito' else 'Envío de ayer' end, e.codigo_seguimiento,
        e.destinatario_nombre || ' ' || e.destinatario_apellido || ' — ' || c.nombre || ', ' || lower(e.estado::text)
 from envios e join comercios c on c.id = e.comercio_id
 order by 1 desc, 2;
