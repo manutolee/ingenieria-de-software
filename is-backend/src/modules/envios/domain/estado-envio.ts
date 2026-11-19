@@ -46,6 +46,13 @@ export function esTransicionValida(
     return ESTADOS_VIAJE_INTERRUMPIBLES.includes(estadoActual);
   }
   if (
+    actor === 'REPARTIDOR' &&
+    estadoActual === 'EN_DOMICILIO' &&
+    estadoDestino === 'CON_NOVEDAD'
+  ) {
+    return true;
+  }
+  if (
     actor === 'SISTEMA' &&
     ((estadoActual === 'INTERRUMPIDO' &&
       (estadoDestino === 'PENDIENTE' || estadoDestino === 'PARADO')) ||
@@ -57,6 +64,16 @@ export function esTransicionValida(
     actor === 'OPERARIO' &&
     estadoActual === 'PARADO' &&
     estadoDestino === 'PENDIENTE'
+  ) {
+    return true;
+  }
+  if (actor === 'OPERARIO' && estadoActual === 'CON_NOVEDAD') {
+    return estadoDestino === 'RETIRADO' || estadoDestino === 'A_DEVOLVER';
+  }
+  if (
+    actor === 'SISTEMA' &&
+    estadoActual === 'CON_NOVEDAD' &&
+    estadoDestino === 'RETIRADO'
   ) {
     return true;
   }

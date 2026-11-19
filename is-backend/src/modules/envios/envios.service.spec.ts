@@ -45,6 +45,9 @@ describe('EnviosService', () => {
     buscarParaActualizar: jest.fn(),
     actualizar: jest.fn(),
     obtenerPanelEnvios: jest.fn(),
+    reintentar: jest.fn(),
+    marcarParaDevolucion: jest.fn(),
+    asignarReintentoPendiente: jest.fn(),
   };
 
   const comerciosService = {
@@ -382,6 +385,65 @@ describe('EnviosService', () => {
       await expect(service.cancelar(5, 12)).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+  });
+
+  describe('reintento de envíos con novedad (HU 24)', () => {
+    it('reintenta solo un envío que está con novedad', async () => {
+      repository.obtenerEstado.mockResolvedValue({
+        id: 5,
+        estado: 'CON_NOVEDAD',
+      });
+      repository.reintentar.mockResolvedValue({
+        envioId: 5,
+        estado: 'RETIRADO',
+        asignadoAhora: true,
+      });
+
+      await expect(
+        service.reintentar(
+          5,
+          { destinoDireccion: 'Calle 51 777' },
+          12,
+        ),
+      ).resolves.toMatchObject({ estado: 'RETIRADO', asignadoAhora: true });
+      expect(repository.reintentar).toHaveBeenCalledWith(
+        5,
+        'CON_NOVEDAD',
+        { destinoDireccion: 'Calle 51 777' },
+        12,
+      );
+    });
+
+    it('rechaza reintentar un envío que no tiene novedad', async () => {
+      repository.obtenerEstado.mockResolvedValue({
+        id: 5,
+        estado: 'RETIRADO',
+      });
+      await expect(
+        service.reintentar(
+          5,
+          { destinoDireccion: 'Calle 51 777' },
+          12,
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(repository.reintentar).not.toHaveBeenCalled();
+    });
+
+    it('marca para devolución un envío con novedad', async () => {
+      repository.obtenerEstado.mockResolvedValue({
+        id: 5,
+        estado: 'CON_NOVEDAD',
+      });
+      repository.marcarParaDevolucion.mockResolvedValue({
+        envioId: 5,
+        estado: 'A_DEVOLVER',
+      });
+
+      await expect(
+        service.marcarParaDevolucion(5, 12),
+      ).resolves.toMatchObject({ estado: 'A_DEVOLVER' });
+      expect(repository.marcarParaDevolucion).toHaveBeenCalledWith(5, 12);
     });
   });
 

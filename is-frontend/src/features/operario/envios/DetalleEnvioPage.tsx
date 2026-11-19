@@ -43,6 +43,7 @@ interface DetalleEnvio {
   vehiculoRequerido: TipoVehiculo
   requiereFoto: boolean
   requiereDni: boolean
+  reintentoPendiente: boolean
   fotoUrl?: string | null
   observaciones: string | null
   comercio: { nombre: string }
@@ -99,6 +100,12 @@ export function DetalleEnvioPage() {
   const [cancelando, setCancelando] = useState(false)
   const [errorCancelacion, setErrorCancelacion] = useState<string | null>(null)
   const [copiado, setCopiado] = useState(false)
+  const [confirmandoReintento, setConfirmandoReintento] = useState(false)
+  const [confirmandoDevolucion, setConfirmandoDevolucion] = useState(false)
+  const [procesandoNovedad, setProcesandoNovedad] = useState(false)
+  const [errorNovedad, setErrorNovedad] = useState<string | null>(null)
+  const [direccionReintento, setDireccionReintento] = useState('')
+  const [ubicacionReintento, setUbicacionReintento] = useState<Coordenadas | null>(null)
 
   const [editando, setEditando] = useState(false)
   const [guardandoEdicion, setGuardandoEdicion] = useState(false)
@@ -155,6 +162,56 @@ export function DetalleEnvioPage() {
     await navigator.clipboard.writeText(`${window.location.origin}/seguimiento/${envio.codigoSeguimiento}`)
     setCopiado(true)
     setTimeout(() => setCopiado(false), 2000)
+  }
+
+  const abrirReintento = () => {
+    if (!envio) return
+    setDireccionReintento(envio.destinoDireccion)
+    setUbicacionReintento(
+      envio.destinoLat !== null && envio.destinoLon !== null
+        ? { lat: envio.destinoLat, lon: envio.destinoLon }
+        : null,
+    )
+    setErrorNovedad(null)
+    setConfirmandoReintento(true)
+  }
+
+  const reintentarEntrega = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!envio) return
+    setProcesandoNovedad(true)
+    setErrorNovedad(null)
+    try {
+      await api(`/envios/${id}/reintentar`, {
+        metodo: 'POST',
+        datos: {
+          destinoDireccion: direccionReintento.trim(),
+          destinoLat: ubicacionReintento?.lat ?? null,
+          destinoLon: ubicacionReintento?.lon ?? null,
+        },
+      })
+      setConfirmandoReintento(false)
+      await cargar()
+    } catch (err) {
+      setErrorNovedad(err instanceof ErrorApi ? err.message : 'No se pudo reintentar la entrega.')
+    } finally {
+      setProcesandoNovedad(false)
+    }
+  }
+
+  const marcarDevolucion = async () => {
+    if (!envio) return
+    setProcesandoNovedad(true)
+    setErrorNovedad(null)
+    try {
+      await api(`/envios/${id}/devolver`, { metodo: 'POST' })
+      setConfirmandoDevolucion(false)
+      await cargar()
+    } catch (err) {
+      setErrorNovedad(err instanceof ErrorApi ? err.message : 'No se pudo marcar la devolución.')
+    } finally {
+      setProcesandoNovedad(false)
+    }
   }
 
   const abrirModalEdicion = () => {
@@ -266,6 +323,21 @@ export function DetalleEnvioPage() {
             <Boton variante="peligro" onClick={() => setConfirmandoCancelacion(true)}>
               Cancelar envío
             </Boton>
+          )}
+          {envio.estado === 'CON_NOVEDAD' && envio.reintentoPendiente && (
+            <p className="w-full rounded-md bg-amber-50 p-3 text-sm text-amber-900" role="status">
+              Reintento en espera: se asignará al mismo repartidor cuando termine su viaje.
+            </p>
+          )}
+          {envio.estado === 'CON_NOVEDAD' && !envio.reintentoPendiente && (
+            <>
+              <Boton variante="primario" onClick={abrirReintento}>
+                Reintentar entrega
+              </Boton>
+              <Boton variante="peligro" onClick={() => setConfirmandoDevolucion(true)}>
+                Devolver al comercio
+              </Boton>
+            </>
           )}
         </div>
       </div>
@@ -439,6 +511,57 @@ export function DetalleEnvioPage() {
             </Boton>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        abierto={confirmandoReintento}
+        onCerrar={() => setConfirmandoReintento(false)}
+        titulo="Reintentar entrega"
+        ancho="max-w-xl"
+      >
+        <form onSubmit={reintentarEntrega} className="space-y-4">
+          <SelectorDireccion
+            etiqueta="Dirección corregida"
+            direccion={direccionReintento}
+            alCambiarDireccion={setDireccionReintento}
+            ubicacion={ubicacionReintento}
+            alCambiarUbicacion={setUbicacionReintento}
+            buscarAlMontar={false}
+            required
+          />
+          {errorNovedad && (
+            <p className="text-sm text-red-600" role="alert">{errorNovedad}</p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Boton variante="secundario" onClick={() => setConfirmandoReintento(false)}>
+              Volver
+            </Boton>
+            <Boton variante="primario" disabled={procesandoNovedad}>
+              {procesandoNovedad ? 'Reintentando...' : 'Reintentar entrega'}
+            </Boton>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        abierto={confirmandoDevolucion}
+        onCerrar={() => setConfirmandoDevolucion(false)}
+        titulo="¿Devolver al comercio?"
+      >
+        <p className="mb-4 text-sm text-gray-600">
+          El envío quedará marcado para devolución y se agregará a los paquetes que el repartidor debe rendir.
+        </p>
+        {errorNovedad && (
+          <p className="mb-4 text-sm text-red-600" role="alert">{errorNovedad}</p>
+        )}
+        <div className="flex justify-end gap-2">
+          <Boton variante="secundario" onClick={() => setConfirmandoDevolucion(false)}>
+            Volver
+          </Boton>
+          <Boton variante="peligro" onClick={marcarDevolucion} disabled={procesandoNovedad}>
+            {procesandoNovedad ? 'Marcando...' : 'Devolver al comercio'}
+          </Boton>
+        </div>
       </Modal>
 
       {/* Modal de cancelación */}

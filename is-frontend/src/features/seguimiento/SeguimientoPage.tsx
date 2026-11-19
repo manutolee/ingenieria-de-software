@@ -159,6 +159,15 @@ const CONFIG_BADGE: Record<EstadoEnvio, { clases: string; dotClases: string; pul
     clases: 'bg-orange-100 text-orange-800 border-orange-200',
     dotClases: 'bg-orange-500',
   },
+  CON_NOVEDAD: {
+    clases: 'bg-rose-100 text-rose-800 border-rose-200',
+    dotClases: 'bg-rose-500',
+    pulsante: true,
+  },
+  A_DEVOLVER: {
+    clases: 'bg-purple-100 text-purple-800 border-purple-200',
+    dotClases: 'bg-purple-500',
+  },
   ENTREGADO: {
     clases: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     dotClases: 'bg-emerald-500',
@@ -195,7 +204,10 @@ function LineaProgreso({
 }) {
   const esCancelado = estadoActual === 'CANCELADO'
   const estadoDetenido =
-    estadoActual === 'INTERRUMPIDO' || estadoActual === 'PARADO'
+    estadoActual === 'INTERRUMPIDO' ||
+    estadoActual === 'PARADO' ||
+    estadoActual === 'CON_NOVEDAD' ||
+    estadoActual === 'A_DEVOLVER'
   const indiceActual = PASOS_PROGRESO.findIndex((p) => p.estado === estadoActual)
 
   const mapaFechas = new Map<EstadoEnvio, string>()
@@ -225,7 +237,11 @@ function LineaProgreso({
         >
           {estadoActual === 'INTERRUMPIDO'
             ? 'Se reportó un incidente en ruta y el envío está siendo reasignado.'
-            : 'El envío está detenido mientras el operario coordina cómo continuar.'}
+            : estadoActual === 'A_DEVOLVER'
+              ? 'El envío será devuelto al comercio.'
+              : estadoActual === 'CON_NOVEDAD'
+                ? 'Se reportó una novedad en el domicilio. El operario coordinará cómo continuar.'
+                : 'El envío está detenido mientras el operario coordina cómo continuar.'}
         </p>
       )}
 
@@ -570,6 +586,15 @@ export function SeguimientoPage() {
                   <BadgeEstado estado={tracking.estadoActual} />
                 </div>
               </div>
+
+              {tracking.avisoReprogramacion && (
+                <p
+                  role="status"
+                  className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-sm font-semibold text-violet-900"
+                >
+                  {tracking.avisoReprogramacion}
+                </p>
+              )}
 
               {/* Datos de origen y destino enmascarados (Épica 2.5) */}
               {(tracking.comercio || tracking.destinatario || tracking.direccionDestino) && (

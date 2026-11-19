@@ -10,6 +10,18 @@ import type {
 } from '../../generated/prisma/client';
 import type { NombresActores } from './domain/historial';
 import { AVISO_CANCELACION_REPARTIDOR } from './domain/cancelacion';
+import {
+  ETIQUETA_MOTIVO_NOVEDAD,
+  ReportarNovedadDto,
+} from './dto/reportar-novedad.dto';
+import { ReintentarEnvioDto } from './dto/reintentar-envio.dto';
+import { DETALLE_REINTENTO } from './domain/reintento';
+const ESTADOS_VIAJE_ACTIVO: EstadoEnvio[] = [
+  'ASIGNADO',
+  'EN_CAMINO_A_RETIRAR',
+  'RETIRADO',
+  'EN_DOMICILIO',
+];
 
 const ETIQUETA_TAMANIO: Record<TamanioPaquete, string> = {
   CHICO: 'Chico',
@@ -229,15 +241,252 @@ export class EnviosRepository {
     });
   }
 
+  async reintentar(
+    id: number,
+    estadoEsperado: EstadoEnvio,
+    dto: ReintentarEnvioDto,
+    operarioId: number,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const [referencia] = await tx.$queryRaw<
+        { repartidorId: number | null }[]
+      >`
+        SELECT repartidor_id AS "repartidorId"
+        FROM envios
+        WHERE id = ${id}`;
+      if (!referencia || referencia.repartidorId === null) return null;
+
+      const [repartidor] = await tx.$queryRaw<
+        {
+          estado: EstadoRepartidor;
+          cierreSolicitado: boolean;
+        }[]
+      >`
+        SELECT estado, cierre_solicitado AS "cierreSolicitado"
+        FROM repartidores
+        WHERE id = ${referencia.repartidorId}
+        FOR UPDATE`;
+      if (
+        !repartidor ||
+        (repartidor.estado !== 'DISPONIBLE' && repartidor.estado !== 'OCUPADO')
+      ) {
+        return null;
+      }
+
+      const [envio] = await tx.$queryRaw<
+        {
+          estado: EstadoEnvio;
+          repartidorId: number | null;
+          destinoDireccion: string;
+          destinoLat: number | null;
+          destinoLon: number | null;
+          reintentoPendiente: boolean;
+        }[]
+      >`
+        SELECT
+          estado,
+          repartidor_id AS "repartidorId",
+          destino_direccion AS "destinoDireccion",
+          destino_lat AS "destinoLat",
+          destino_lon AS "destinoLon",
+          reintento_pendiente AS "reintentoPendiente"
+        FROM envios
+        WHERE id = ${id}
+        FOR UPDATE`;
+      if (
+        !envio ||
+        envio.estado !== estadoEsperado ||
+        envio.repartidorId !== referencia.repartidorId ||
+        envio.reintentoPendiente
+      ) {
+        return null;
+      }
+
+      const ofertaPendiente = await tx.oferta.findFirst({
+        where: {
+          repartidorId: referencia.repartidorId,
+          estado: 'PENDIENTE',
+        },
+        select: { id: true },
+      });
+      if (ofertaPendiente) return null;
+
+      const [viajeEnCurso] = await tx.$queryRaw<{ id: number }[]>`
+        SELECT id
+        FROM envios
+        WHERE repartidor_id = ${referencia.repartidorId}
+          AND estado IN ('ASIGNADO', 'EN_CAMINO_A_RETIRAR', 'RETIRADO', 'EN_DOMICILIO')
+          AND id <> ${id}
+        LIMIT 1`;
+      if (repartidor.estado === 'OCUPADO' && !viajeEnCurso) return null;
+      if (repartidor.estado === 'DISPONIBLE' && viajeEnCurso) return null;
+      if (repartidor.estado === 'DISPONIBLE' && repartidor.cierreSolicitado) {
+        return null;
+      }
+      const asignadoAhora =
+        viajeEnCurso === undefined && repartidor.estado === 'DISPONIBLE';
+      const direccion = dto.destinoDireccion.trim();
+      const cambiaDireccion = direccion !== envio.destinoDireccion;
+      const destinoLat =
+        dto.destinoLat !== undefined
+          ? dto.destinoLat
+          : cambiaDireccion
+            ? null
+            : envio.destinoLat;
+      const destinoLon =
+        dto.destinoLon !== undefined
+          ? dto.destinoLon
+          : cambiaDireccion
+            ? null
+            : envio.destinoLon;
+
+      await tx.envio.update({
+        where: { id },
+        data: {
+          estado: asignadoAhora ? 'RETIRADO' : 'CON_NOVEDAD',
+          reintentoPendiente: !asignadoAhora,
+          destinoDireccion: direccion,
+          destinoLat,
+          destinoLon,
+          duracionEstimadaMin: null,
+        },
+      });
+
+      if (asignadoAhora) {
+        await tx.repartidor.update({
+          where: { id: referencia.repartidorId },
+          data: { estado: 'OCUPADO', enColaDesde: null },
+        });
+      }
+
+      await tx.eventoEnvio.create({
+        data: {
+          envioId: id,
+          tipo: 'REASIGNACION',
+          estadoAnterior: 'CON_NOVEDAD',
+          estadoNuevo: asignadoAhora ? 'RETIRADO' : 'CON_NOVEDAD',
+          detalle: DETALLE_REINTENTO,
+          actorTipo: 'OPERARIO',
+          actorId: operarioId,
+        },
+      });
+
+      return {
+        envioId: id,
+        estado: asignadoAhora
+          ? ('RETIRADO' as const)
+          : ('CON_NOVEDAD' as const),
+        repartidorId: referencia.repartidorId,
+        asignadoAhora,
+      };
+    });
+  }
+
+  async marcarParaDevolucion(id: number, operarioId: number) {
+    return this.prisma.$transaction(async (tx) => {
+      const [referencia] = await tx.$queryRaw<
+        { repartidorId: number | null }[]
+      >`
+        SELECT repartidor_id AS "repartidorId"
+        FROM envios
+        WHERE id = ${id}`;
+      if (!referencia || referencia.repartidorId === null) return null;
+
+      await tx.$queryRaw`
+        SELECT id
+        FROM repartidores
+        WHERE id = ${referencia.repartidorId}
+        FOR UPDATE`;
+      const [envio] = await tx.$queryRaw<
+        { estado: EstadoEnvio; repartidorId: number | null }[]
+      >`
+        SELECT estado, repartidor_id AS "repartidorId"
+        FROM envios
+        WHERE id = ${id}
+        FOR UPDATE`;
+      if (
+        !envio ||
+        envio.estado !== 'CON_NOVEDAD' ||
+        envio.repartidorId !== referencia.repartidorId
+      ) {
+        return null;
+      }
+
+      await tx.envio.update({
+        where: { id },
+        data: { estado: 'A_DEVOLVER', reintentoPendiente: false },
+      });
+      await tx.eventoEnvio.create({
+        data: {
+          envioId: id,
+          tipo: 'CAMBIO_ESTADO',
+          estadoAnterior: 'CON_NOVEDAD',
+          estadoNuevo: 'A_DEVOLVER',
+          detalle: 'Marcado para devolución al comercio',
+          actorTipo: 'OPERARIO',
+          actorId: operarioId,
+        },
+      });
+
+      return {
+        envioId: id,
+        estado: 'A_DEVOLVER' as const,
+        repartidorId: referencia.repartidorId,
+      };
+    });
+  }
+
+  async reportarNovedad(
+    repartidorId: number,
+    dto: ReportarNovedadDto,
+  ): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const [repartidor] = await tx.$queryRaw<{ estado: EstadoRepartidor }[]>`
+        SELECT estado
+        FROM repartidores
+        WHERE id = ${repartidorId}
+        FOR UPDATE`;
+      if (repartidor?.estado !== 'OCUPADO') return false;
+
+      const [envio] = await tx.$queryRaw<{ id: number; estado: EstadoEnvio }[]>`
+        SELECT id, estado
+        FROM envios
+        WHERE repartidor_id = ${repartidorId}
+          AND estado = 'EN_DOMICILIO'
+        ORDER BY id
+        LIMIT 1
+        FOR UPDATE`;
+      if (!envio) return false;
+
+      await tx.envio.update({
+        where: { id: envio.id },
+        data: { estado: 'CON_NOVEDAD', reintentoPendiente: false },
+      });
+      const comentario = dto.comentario?.trim();
+      await tx.eventoEnvio.create({
+        data: {
+          envioId: envio.id,
+          tipo: 'NOVEDAD',
+          estadoAnterior: 'EN_DOMICILIO',
+          estadoNuevo: 'CON_NOVEDAD',
+          detalle: `${ETIQUETA_MOTIVO_NOVEDAD[dto.motivo]}${comentario ? `: ${comentario}` : ''}`,
+          actorTipo: 'REPARTIDOR',
+          actorId: repartidorId,
+        },
+      });
+
+      await this.liberarRepartidor(tx, repartidorId);
+      return true;
+    });
+  }
+
   // Viaje activo del repartidor (E-2): como mucho hay uno, porque el motor solo le ofrece
   // envíos mientras está DISPONIBLE y al aceptar pasa a OCUPADO.
   async buscarViajeActivoPorRepartidor(repartidorId: number) {
     return this.prisma.envio.findFirst({
       where: {
         repartidorId,
-        estado: {
-          in: ['ASIGNADO', 'EN_CAMINO_A_RETIRAR', 'RETIRADO', 'EN_DOMICILIO'],
-        },
+        estado: { in: ESTADOS_VIAJE_ACTIVO },
       },
       omit: { fotoUrl: true },
       include: {
@@ -314,6 +563,13 @@ export class EnviosRepository {
     ubicacion?: string,
   ): Promise<{ envioId: number; estadoAnterior: EstadoEnvio } | null> {
     return this.prisma.$transaction(async (tx) => {
+      const repartidores = await tx.$queryRaw<{ estado: EstadoRepartidor }[]>`
+        SELECT estado
+        FROM repartidores
+        WHERE id = ${repartidorId}
+        FOR UPDATE`;
+      if (repartidores[0]?.estado !== 'OCUPADO') return null;
+
       const envios = await tx.$queryRaw<{ id: number; estado: EstadoEnvio }[]>`
         SELECT id, estado
         FROM envios
@@ -324,13 +580,6 @@ export class EnviosRepository {
         FOR UPDATE`;
       const envio = envios[0];
       if (!envio) return null;
-
-      const repartidores = await tx.$queryRaw<{ estado: EstadoRepartidor }[]>`
-        SELECT estado
-        FROM repartidores
-        WHERE id = ${repartidorId}
-        FOR UPDATE`;
-      if (repartidores[0]?.estado !== 'OCUPADO') return null;
 
       const paqueteRetirado =
         envio.estado === 'RETIRADO' || envio.estado === 'EN_DOMICILIO';
@@ -426,9 +675,27 @@ export class EnviosRepository {
             FOR UPDATE`
         : [];
 
-      // Después se bloquea el envío (mismo orden que cancelar). Sin el bloqueo, si el
-      // repartidor marcaba "Paquete retirado" entre la lectura y el update, un cambio de
-      // tamaño devolvía a PENDIENTE un paquete que ya estaba en la calle.
+      // Si se libera a su repartidor, bloquearlo antes del envío mantiene el mismo orden
+      // que los reintentos y evita que una entrega concurrente deje un reintento sin asignar.
+      if (opciones.cambiaVehiculo) {
+        const [referencia] = await tx.$queryRaw<
+          { repartidorId: number | null }[]
+        >`
+          SELECT repartidor_id AS "repartidorId"
+          FROM envios
+          WHERE id = ${id}`;
+        if (referencia?.repartidorId !== null && referencia) {
+          await tx.$queryRaw`
+            SELECT id
+            FROM repartidores
+            WHERE id = ${referencia.repartidorId}
+            FOR UPDATE`;
+        }
+      }
+
+      // Después se bloquea el envío. Sin el bloqueo, si el repartidor marcaba "Paquete
+      // retirado" entre la lectura y el update, un cambio de tamaño podía reasignar un
+      // paquete que ya estaba en la calle.
       const [envioActual] = await tx.$queryRaw<
         { estado: EstadoEnvio; repartidorId: number | null }[]
       >`
@@ -557,6 +824,13 @@ export class EnviosRepository {
     fotoUrl?: string,
   ): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
+      const [repartidor] = await tx.$queryRaw<{ estado: EstadoRepartidor }[]>`
+        SELECT estado
+        FROM repartidores
+        WHERE id = ${repartidorId}
+        FOR UPDATE`;
+      if (repartidor?.estado !== 'OCUPADO') return false;
+
       const dataEnvio: Prisma.EnvioUpdateManyMutationInput = {
         estado: estadoNuevo,
       };
@@ -607,6 +881,20 @@ export class EnviosRepository {
         FROM ofertas
         WHERE envio_id = ${id} AND estado = 'PENDIENTE'
         FOR UPDATE`;
+
+      const [referencia] = await tx.$queryRaw<
+        { repartidorId: number | null }[]
+      >`
+        SELECT repartidor_id AS "repartidorId"
+        FROM envios
+        WHERE id = ${id}`;
+      if (referencia?.repartidorId !== null && referencia) {
+        await tx.$queryRaw`
+          SELECT id
+          FROM repartidores
+          WHERE id = ${referencia.repartidorId}
+          FOR UPDATE`;
+      }
 
       const { count } = await tx.envio.updateMany({
         where: { id, estado: estadoAnterior },
@@ -659,6 +947,61 @@ export class EnviosRepository {
     });
   }
 
+  async asignarReintentoPendiente(repartidorId: number): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const [repartidor] = await tx.$queryRaw<{ estado: EstadoRepartidor }[]>`
+        SELECT estado
+        FROM repartidores
+        WHERE id = ${repartidorId}
+        FOR UPDATE`;
+      if (repartidor?.estado !== 'DISPONIBLE') return false;
+
+      const ofertaPendiente = await tx.oferta.findFirst({
+        where: { repartidorId, estado: 'PENDIENTE' },
+        select: { id: true },
+      });
+      if (ofertaPendiente) return false;
+
+      const [envio] = await tx.$queryRaw<{ id: number }[]>`
+        SELECT id
+        FROM envios
+        WHERE repartidor_id = ${repartidorId}
+          AND estado = 'CON_NOVEDAD'
+          AND reintento_pendiente = true
+        ORDER BY actualizado_en, id
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED`;
+      if (!envio) return false;
+
+      const { count } = await tx.envio.updateMany({
+        where: {
+          id: envio.id,
+          repartidorId,
+          estado: 'CON_NOVEDAD',
+          reintentoPendiente: true,
+        },
+        data: { estado: 'RETIRADO', reintentoPendiente: false },
+      });
+      if (count === 0) return false;
+
+      await tx.repartidor.updateMany({
+        where: { id: repartidorId, estado: 'DISPONIBLE' },
+        data: { estado: 'OCUPADO', enColaDesde: null },
+      });
+      await tx.eventoEnvio.create({
+        data: {
+          envioId: envio.id,
+          tipo: 'REASIGNACION',
+          estadoAnterior: 'CON_NOVEDAD',
+          estadoNuevo: 'RETIRADO',
+          detalle: DETALLE_REINTENTO,
+          actorTipo: 'SISTEMA',
+        },
+      });
+      return true;
+    });
+  }
+
   // Envíos del panel del día (HU4): todos los que no están en un estado final. Se excluye
   // por estados finales (y no con una lista de estados activos) para que un estado nuevo
   // del enum aparezca en el panel sin tocar esta consulta.
@@ -694,13 +1037,67 @@ export class EnviosRepository {
     repartidorId: number,
     extra: Prisma.RepartidorUpdateManyMutationInput = {},
   ) {
-    await tx.repartidor.updateMany({
-      where: { id: repartidorId, estado: 'OCUPADO', cierreSolicitado: true },
-      data: { estado: 'ESPERANDO_VALIDACION_CIERRE', enColaDesde: null },
-    });
-    // Si el UPDATE anterior aplicó, ya no está OCUPADO y este no hace nada.
-    await tx.repartidor.updateMany({
-      where: { id: repartidorId, estado: 'OCUPADO' },
+    const [repartidor] = await tx.$queryRaw<
+      { estado: EstadoRepartidor; cierreSolicitado: boolean }[]
+    >`
+      SELECT estado, cierre_solicitado AS "cierreSolicitado"
+      FROM repartidores
+      WHERE id = ${repartidorId}
+      FOR UPDATE`;
+    if (repartidor?.estado !== 'OCUPADO') return;
+
+    const [reintentoPendiente] = await tx.$queryRaw<{ id: number }[]>`
+      SELECT id
+      FROM envios
+      WHERE repartidor_id = ${repartidorId}
+        AND estado = 'CON_NOVEDAD'
+        AND reintento_pendiente = true
+      ORDER BY actualizado_en, id
+      LIMIT 1
+      FOR UPDATE`;
+    if (reintentoPendiente) {
+      const { count } = await tx.envio.updateMany({
+        where: {
+          id: reintentoPendiente.id,
+          repartidorId,
+          estado: 'CON_NOVEDAD',
+          reintentoPendiente: true,
+        },
+        data: { estado: 'RETIRADO', reintentoPendiente: false },
+      });
+      if (count === 0) return;
+
+      await tx.eventoEnvio.create({
+        data: {
+          envioId: reintentoPendiente.id,
+          tipo: 'REASIGNACION',
+          estadoAnterior: 'CON_NOVEDAD',
+          estadoNuevo: 'RETIRADO',
+          detalle: DETALLE_REINTENTO,
+          actorTipo: 'SISTEMA',
+        },
+      });
+      await tx.repartidor.update({
+        where: { id: repartidorId },
+        data: { estado: 'OCUPADO', enColaDesde: null, ...extra },
+      });
+      return;
+    }
+
+    if (repartidor.cierreSolicitado) {
+      await tx.repartidor.update({
+        where: { id: repartidorId },
+        data: {
+          estado: 'ESPERANDO_VALIDACION_CIERRE',
+          enColaDesde: null,
+          ...extra,
+        },
+      });
+      return;
+    }
+
+    await tx.repartidor.update({
+      where: { id: repartidorId },
       data: { estado: 'DISPONIBLE', enColaDesde: new Date(), ...extra },
     });
   }
