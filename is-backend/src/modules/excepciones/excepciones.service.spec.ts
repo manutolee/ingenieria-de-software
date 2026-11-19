@@ -8,6 +8,7 @@ describe('ExcepcionesService', () => {
     transaccion: jest.fn((trabajo: (t: object) => unknown) => trabajo(tx)),
     listarSinRepartidor: jest.fn(),
     listarIncidentesActivos: jest.fn(),
+    listarDevolucionesSinRepartidor: jest.fn(),
     buscarEnvio: jest.fn(),
     listarRepartidoresAsignables: jest.fn(),
     bloquearEnvio: jest.fn(),
@@ -30,6 +31,7 @@ describe('ExcepcionesService', () => {
     vehiculoRequerido: 'MOTO',
     estado: 'PENDIENTE',
     comercio: { nombre: 'Kiosco' },
+    _count: { eventos: 0 },
     ofertas: [{ expiraEn: haceMinutos(vencioHace) }],
   });
 
@@ -39,6 +41,7 @@ describe('ExcepcionesService', () => {
       trabajo(tx),
     );
     repo.listarIncidentesActivos.mockResolvedValue([]);
+    repo.listarDevolucionesSinRepartidor.mockResolvedValue([]);
     repo.reactivarEnvioParado.mockResolvedValue(true);
     service = new ExcepcionesService(repo as unknown as ExcepcionesRepository);
   });
@@ -62,6 +65,69 @@ describe('ExcepcionesService', () => {
       ]);
       const { excepciones } = await service.listar(ahora);
       expect(excepciones.map((e) => e.minutosEspera)).toEqual([30, 5]);
+    });
+
+    it('muestra una orden de devolución sin repartidor para asignarla a mano (HU 38)', async () => {
+      repo.listarSinRepartidor.mockResolvedValue([]);
+      repo.listarDevolucionesSinRepartidor.mockResolvedValue([
+        {
+          id: 4,
+          creadaEn: haceMinutos(12),
+          vehiculoRequerido: 'AUTO',
+          comercio: { nombre: 'Kiosco', direccion: 'Calle 7 1234' },
+          envios: [
+            {
+              id: 20,
+              codigoSeguimiento: 'DEV1',
+              tamanio: 'CHICO',
+              ofertas: [],
+            },
+            {
+              id: 21,
+              codigoSeguimiento: 'DEV2',
+              tamanio: 'MEDIANO',
+              ofertas: [],
+            },
+          ],
+        },
+      ]);
+
+      const { excepciones } = await service.listar(ahora);
+
+      expect(excepciones).toEqual([
+        expect.objectContaining({
+          envioId: 20,
+          codigoSeguimiento: 'DEV1 (+1)',
+          destinoDireccion: 'Calle 7 1234',
+          vehiculoRequerido: 'AUTO',
+          motivo: 'DEVOLUCION_SIN_REPARTIDOR',
+          puedeAsignar: true,
+          puedeCancelar: false,
+          minutosEspera: 12,
+        }),
+      ]);
+    });
+
+    it('no muestra una orden de devolución que ya tiene una oferta en curso', async () => {
+      repo.listarSinRepartidor.mockResolvedValue([]);
+      repo.listarDevolucionesSinRepartidor.mockResolvedValue([
+        {
+          id: 4,
+          creadaEn: haceMinutos(12),
+          vehiculoRequerido: 'MOTO',
+          comercio: { nombre: 'Kiosco', direccion: 'Calle 7 1234' },
+          envios: [
+            {
+              id: 20,
+              codigoSeguimiento: 'DEV1',
+              tamanio: 'CHICO',
+              ofertas: [{ id: 1 }],
+            },
+          ],
+        },
+      ]);
+
+      await expect(service.listar(ahora)).resolves.toEqual({ excepciones: [] });
     });
 
     it('sin excepciones devuelve la lista vacía (HU 22, escenario 6)', async () => {
@@ -117,6 +183,36 @@ describe('ExcepcionesService', () => {
       repo.bloquearRepartidor.mockResolvedValue(repartidor);
       repo.repartidorTieneOfertaVigente.mockResolvedValue(false);
       repo.ofrecerManual.mockResolvedValue({ id: 50, expiraEn: ahora });
+    });
+
+    it('asigna a mano una orden de devolución sin repartidor (HU 38)', async () => {
+      repo.bloquearEnvio.mockResolvedValue({
+        id: 20,
+        estado: 'EN_DEVOLUCION',
+        vehiculoRequerido: 'MOTO',
+        ordenDevolucionId: 4,
+        ordenTieneRepartidor: false,
+        esRepresentanteDeLaOrden: true,
+      });
+
+      await expect(service.asignarManual(20, 9, 3)).resolves.toMatchObject({
+        ofertaId: 50,
+      });
+    });
+
+    it('rechaza asignar una orden de devolución que ya tiene repartidor', async () => {
+      repo.bloquearEnvio.mockResolvedValue({
+        id: 20,
+        estado: 'EN_DEVOLUCION',
+        vehiculoRequerido: 'MOTO',
+        ordenDevolucionId: 4,
+        ordenTieneRepartidor: true,
+        esRepresentanteDeLaOrden: true,
+      });
+
+      await expect(service.asignarManual(20, 9, 3)).rejects.toThrow(
+        'El envío ya no espera repartidor',
+      );
     });
 
     it('le manda la oferta directo al repartidor elegido (HU 22, escenarios 1 y 5)', async () => {

@@ -253,6 +253,7 @@ async function main() {
         await tx.oferta.deleteMany();
         await tx.eventoEnvio.deleteMany();
         await tx.envio.deleteMany();
+        await tx.ordenDevolucion.deleteMany();
         await tx.refreshToken.deleteMany();
         await tx.repartidor.deleteMany();
         await tx.comercio.deleteMany();

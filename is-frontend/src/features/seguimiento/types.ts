@@ -8,6 +8,9 @@ export type EstadoEnvio =
   | 'PARADO'
   | 'CON_NOVEDAD'
   | 'A_DEVOLVER'
+  | 'EN_CUSTODIA'
+  | 'EN_DEVOLUCION'
+  | 'DEVUELTO_AL_COMERCIO'
   | 'ENTREGADO'
   | 'CANCELADO';
 

@@ -21,6 +21,7 @@ describe('Máquina de estados del envío', () => {
       ['INTERRUMPIDO', 'PARADO', 'SISTEMA'],
       ['PENDIENTE', 'PARADO', 'SISTEMA'],
       ['PARADO', 'PENDIENTE', 'OPERARIO'],
+      ['PARADO', 'CANCELADO', 'OPERARIO'],
       ['PENDIENTE', 'CANCELADO', 'OPERARIO'],
       ['ASIGNADO', 'CANCELADO', 'OPERARIO'],
       ['EN_CAMINO_A_RETIRAR', 'CANCELADO', 'OPERARIO'],
@@ -96,7 +97,6 @@ describe('Máquina de estados del envío', () => {
         'CANCELADO',
         'OPERARIO',
       ],
-      ['no se cancela un envío parado', 'PARADO', 'CANCELADO', 'OPERARIO'],
       [
         'no se cancela un envío con novedad',
         'CON_NOVEDAD',

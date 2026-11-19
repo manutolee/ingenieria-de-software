@@ -22,10 +22,7 @@ export function InicioRepartidorPage() {
     <>
       {aviso && <p className="rounded-xl bg-green-800 p-4 text-center font-semibold">{aviso}</p>}
       <OfertaActual key={`oferta-${vuelta}`} alAceptar={() => refrescar()} />
-      <ViajeActual
-        key={`viaje-${vuelta}`}
-        alEntregar={() => refrescar('¡Entrega registrada! Ya estás de nuevo en la cola.')}
-      />
+      <ViajeActual key={`viaje-${vuelta}`} alTerminar={refrescar} />
       <PanelJornada key={`jornada-${vuelta}`} />
       {/* HU 34 */}
       <Link

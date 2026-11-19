@@ -57,20 +57,45 @@ const ACTOR: Record<EntradaHistorial['actorTipo'], string> = {
   SISTEMA: 'Sistema',
 }
 
+// Textos que el backend guarda pensando en otro lector (el repartidor o el destinatario).
+// En el historial del operario se reemplazan por una descripción propia.
+const DETALLE_REINTENTO = 'Tu envío fue reprogramado'
+const AVISO_CANCELACION = 'El envío fue cancelado. No lo retires.'
+
 function describirEntrada(entrada: EntradaHistorial): string {
   if (entrada.tipo === 'CREADO') return 'Envío registrado'
   if (entrada.tipo === 'OFERTA_ENVIADA') return `Oferta enviada a ${entrada.repartidorNombre}`
   if (entrada.tipo === 'OFERTA_RECHAZADA') return 'Oferta rechazada'
   if (entrada.tipo === 'OFERTA_VENCIDA') return `Oferta vencida por inactividad (${entrada.repartidorNombre})`
+  // HU 24: el operario pidió reintentar la entrega (o el sistema la asignó cuando el repartidor quedó libre).
+  if (entrada.tipo === 'REASIGNACION' && entrada.detalle === DETALLE_REINTENTO) {
+    return entrada.estadoNuevo === 'RETIRADO'
+      ? 'Reintento de entrega asignado al repartidor'
+      : 'Reintento de entrega en espera'
+  }
   // Modificaciones del operario (HU 31): el detalle dice qué pasó. Van antes que estadoNuevo
   // porque la reasignación por cambio de tamaño también lo trae (vuelve a PENDIENTE).
   if (entrada.tipo === 'REASIGNACION') return entrada.detalle ?? 'Envío reasignado'
-  // La novedad es lo que le llega al repartidor en la app: se aclara para no leerla como un
-  // segundo cambio de datos, que ya figura en su propia entrada.
-  if (entrada.tipo === 'NOVEDAD') return `Aviso al repartidor: «${entrada.detalle ?? 'Novedad registrada'}»`
+  // HU 23: la novedad la reporta el repartidor desde el domicilio. Las otras NOVEDAD son avisos
+  // que el operario le mandó al repartidor (HU 31).
+  if (entrada.tipo === 'NOVEDAD') {
+    return entrada.actorTipo === 'REPARTIDOR'
+      ? `Novedad reportada: «${entrada.detalle ?? 'sin detalle'}»`
+      : `Aviso al repartidor: «${entrada.detalle ?? 'Novedad registrada'}»`
+  }
   if (entrada.tipo === 'NOTA') return entrada.detalle ?? 'Modificación de datos'
   if (entrada.estadoNuevo) return ETIQUETA_ESTADO_ENVIO[entrada.estadoNuevo]
   return entrada.detalle ?? entrada.tipo
+}
+
+// Segunda línea de la entrada: la evidencia de la entrega (E-4), el aviso que recibió el
+// repartidor al cancelar, etc. No se repite si ya es el título.
+function detalleEntrada(entrada: EntradaHistorial): string | null {
+  if (!entrada.estadoNuevo || !entrada.detalle) return null
+  if (entrada.tipo === 'REASIGNACION' || entrada.tipo === 'NOVEDAD') return null
+  if (entrada.detalle === AVISO_CANCELACION) return `Se avisó al repartidor: «${AVISO_CANCELACION}»`
+  if (entrada.detalle === ETIQUETA_ESTADO_ENVIO[entrada.estadoNuevo]) return null
+  return entrada.detalle
 }
 
 // La foto se usa como src de un <img>: solo se muestra si es una imagen embebida (lo único que
@@ -83,10 +108,12 @@ function responsable(entrada: EntradaHistorial): string {
 
 // Antes de que el repartidor retire el paquete (HU 31).
 const ESTADOS_MODIFICABLES: EstadoEnvio[] = ['PENDIENTE', 'ASIGNADO', 'EN_CAMINO_A_RETIRAR']
+// Incluye RETIRADO y EN_DOMICILIO a propósito: el backend responde que ya fue retirado (HU 30).
 const ESTADOS_CON_ACCION_CANCELAR: EstadoEnvio[] = [
   'PENDIENTE',
   'ASIGNADO',
   'EN_CAMINO_A_RETIRAR',
+  'PARADO',
   'RETIRADO',
   'EN_DOMICILIO',
 ]
@@ -426,10 +453,7 @@ export function DetalleEnvioPage() {
             {envio.historial.map((entrada) => (
               <li key={entrada.clave}>
                 <p className="font-medium">{describirEntrada(entrada)}</p>
-                {/* Por ejemplo, la evidencia que se pidió al entregar (E-4). */}
-                {entrada.estadoNuevo && entrada.detalle && (
-                  <p className="text-sm text-gray-600">{entrada.detalle}</p>
-                )}
+                {detalleEntrada(entrada) && <p className="text-sm text-gray-600">{detalleEntrada(entrada)}</p>}
                 {/* La foto es del envío (se guarda una sola vez): se muestra en el paso de la entrega. */}
                 {entrada.estadoNuevo === 'ENTREGADO' && fotoEntrega && (
                   <div className="mt-2">

@@ -54,7 +54,7 @@ export class ComerciosService {
     await this.obtenerPorId(id); // Valida que exista
     // Un envío sin terminar todavía depende del comercio (hay que retirarlo, o el motor lo
     // sigue ofreciendo): se termina o se cancela antes de darlo de baja.
-    if ((await this.comerciosRepository.contarEnviosEnCurso(id)) > 0) {
+    if ((await this.comerciosRepository.contarEnviosEnCurso(id, ESTADOS_FINALES)) > 0) {
       throw new ConflictException('El comercio tiene envíos en curso');
     }
     return this.comerciosRepository.eliminarLogico(id);
@@ -83,8 +83,6 @@ export class ComerciosService {
       comercioNombre: comercio.nombre,
       fecha,
       entregados: porEstado.get('ENTREGADO') ?? 0,
-      // Hoy no hay estado "devuelto al comercio" (HU 39): da 0 hasta que se agregue al enum y a
-      // ESTADOS_FINALES. Ojo: el evento DEVOLUCION es otra cosa (paquete vuelto a la base).
       devueltos: porEstado.get('DEVUELTO_AL_COMERCIO') ?? 0,
       cancelados: porEstado.get('CANCELADO') ?? 0,
     };

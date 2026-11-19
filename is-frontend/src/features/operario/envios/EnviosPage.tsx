@@ -77,8 +77,9 @@ export function EnviosPage() {
     try {
       const filtros: Record<Pestana, string> = {
         PENDIENTE: 'PENDIENTE',
-        EN_CURSO: 'ASIGNADO,EN_CAMINO_A_RETIRAR,RETIRADO,EN_DOMICILIO',
-        FINALIZADO: 'ENTREGADO,CANCELADO',
+        EN_CURSO:
+          'ASIGNADO,EN_CAMINO_A_RETIRAR,RETIRADO,EN_DOMICILIO,INTERRUMPIDO,PARADO,CON_NOVEDAD,A_DEVOLVER,EN_CUSTODIA,EN_DEVOLUCION',
+        FINALIZADO: 'ENTREGADO,CANCELADO,DEVUELTO_AL_COMERCIO',
       }
       const parametros = new URLSearchParams()
       if (filtrosAplicados) {

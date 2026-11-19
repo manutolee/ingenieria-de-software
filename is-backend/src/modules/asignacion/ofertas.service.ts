@@ -8,7 +8,10 @@ import {
   convertirMedianocheArgentinaAUTC,
   finDelDiaArgentina,
 } from '../../common/dia-argentina';
-import type { EstadoOferta } from '../../generated/prisma/client';
+import type {
+  EstadoOferta,
+  TamanioPaquete,
+} from '../../generated/prisma/client';
 import { AsignacionService } from './asignacion.service';
 import { cerradaAntesDeVencer } from './domain/cierre-oferta';
 import { type OfertaBloqueada, OfertasRepository } from './ofertas.repository';
@@ -64,6 +67,33 @@ function finDelRango(valor?: string): Date | undefined {
   return valor.length === 10 ? finDelDiaArgentina(valor) : new Date(valor);
 }
 
+const TAMANIOS_DE_MENOR_A_MAYOR: TamanioPaquete[] = ['CHICO', 'MEDIANO', 'GRANDE'];
+
+// Una orden de devolución (HU 38) se ofrece como un viaje del depósito al comercio, con el
+// paquete más grande como tamaño: es lo que define si entra en el vehículo.
+function descripcionDevolucion(
+  envio: { id: number; comercio: { nombre: string; direccion: string } },
+  orden: { envios: { tamanio: TamanioPaquete }[] },
+): OfertaParaRepartidor['envio'] {
+  const cantidad = orden.envios.length;
+  const tamanio = orden.envios.reduce<TamanioPaquete>(
+    (mayor, { tamanio: actual }) =>
+      TAMANIOS_DE_MENOR_A_MAYOR.indexOf(actual) >
+      TAMANIOS_DE_MENOR_A_MAYOR.indexOf(mayor)
+        ? actual
+        : mayor,
+    'CHICO',
+  );
+  return {
+    id: envio.id,
+    comercio: envio.comercio.nombre,
+    origenDireccion: 'Depósito (base)',
+    destinoDireccion: envio.comercio.direccion,
+    tamanio,
+    observaciones: `Devolución al comercio: ${cantidad} ${cantidad === 1 ? 'paquete' : 'paquetes'}`,
+  };
+}
+
 // Respuestas del repartidor a las ofertas (épica 3.3) y su vencimiento.
 @Injectable()
 export class OfertasService {
@@ -83,14 +113,16 @@ export class OfertasService {
         0,
         Math.floor((oferta.expiraEn.getTime() - Date.now()) / 1000),
       ),
-      envio: {
-        id: oferta.envio.id,
-        comercio: oferta.envio.comercio.nombre,
-        origenDireccion: oferta.envio.origenDireccion,
-        destinoDireccion: oferta.envio.destinoDireccion,
-        tamanio: oferta.envio.tamanio,
-        observaciones: oferta.envio.observaciones,
-      },
+      envio: oferta.envio.ordenDevolucion
+        ? descripcionDevolucion(oferta.envio, oferta.envio.ordenDevolucion)
+        : {
+            id: oferta.envio.id,
+            comercio: oferta.envio.comercio.nombre,
+            origenDireccion: oferta.envio.origenDireccion,
+            destinoDireccion: oferta.envio.destinoDireccion,
+            tamanio: oferta.envio.tamanio,
+            observaciones: oferta.envio.observaciones,
+          },
     };
   }
 

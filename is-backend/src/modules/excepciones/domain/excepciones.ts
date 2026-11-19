@@ -5,13 +5,18 @@ import type {
 } from '../../../generated/prisma/client';
 import { vehiculosQuePuedenLlevar } from '../../asignacion/domain/vehiculos';
 
-export type MotivoExcepcion = 'SIN_REPARTIDOR' | 'INCIDENTE' | 'PARADO';
+export type MotivoExcepcion =
+  | 'SIN_REPARTIDOR'
+  | 'INCIDENTE'
+  | 'PARADO'
+  | 'DEVOLUCION_SIN_REPARTIDOR';
 
 // Texto que ve el operario para cada motivo.
 export const AVISO_MOTIVO: Record<MotivoExcepcion, string> = {
   SIN_REPARTIDOR: 'Envío sin repartidor disponible',
   INCIDENTE: 'Incidente en ruta reportado',
   PARADO: 'Envío parado: no hay repartidores compatibles',
+  DEVOLUCION_SIN_REPARTIDOR: 'Orden de devolución sin repartidor disponible',
 };
 
 export type Excepcion = {

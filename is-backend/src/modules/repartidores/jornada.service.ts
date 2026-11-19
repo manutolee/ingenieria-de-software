@@ -11,7 +11,6 @@ import {
 } from '../../generated/prisma/client';
 import { AsignacionService } from '../asignacion/asignacion.service';
 import { AuthService } from '../auth/auth.service';
-import type { AprobarCierreDto } from './dto';
 import {
   RepartidoresRepository,
   type RepartidorPublico,
@@ -157,13 +156,9 @@ export class JornadaService {
     };
   }
 
-  // G-1: el operario aprueba el cierre cuando recibió en la base todos los paquetes que el
-  // repartidor tenía que devolver. Los cuenta el sistema: el operario solo dice cuántos recibió.
-  async aprobarCierre(
-    repartidorId: number,
-    dto: AprobarCierreDto,
-    operarioId: number,
-  ) {
+  // G-1 / HU 36: el operario aprueba el cierre cuando registró el reingreso de todos los
+  // paquetes que el repartidor tenía que devolver (HU 37). Los cuenta el sistema.
+  async aprobarCierre(repartidorId: number) {
     const repartidor = await this.repo.buscarPorId(repartidorId);
     if (!repartidor) throw new NotFoundException('El repartidor no existe');
     if (repartidor.estado !== 'ESPERANDO_VALIDACION_CIERRE') {
@@ -172,25 +167,15 @@ export class JornadaService {
       );
     }
 
-    const aDevolver = await this.repo.obtenerPaquetesADevolver(repartidorId);
-    const faltantes = aDevolver.length - dto.paquetesDevueltos;
+    const faltantes = (await this.repo.obtenerPaquetesADevolver(repartidorId))
+      .length;
     if (faltantes > 0) {
       throw new BadRequestException(
         `Faltan rendir ${faltantes} ${faltantes === 1 ? 'paquete' : 'paquetes'}`,
       );
     }
-    if (faltantes < 0) {
-      throw new BadRequestException(
-        `El repartidor tenía que devolver ${aDevolver.length} ${aDevolver.length === 1 ? 'paquete' : 'paquetes'}`,
-      );
-    }
 
-    const aprobado = await this.repo.aprobarCierre(
-      repartidorId,
-      aDevolver.map((paquete) => paquete.id),
-      operarioId,
-    );
-    if (!aprobado) {
+    if (!(await this.repo.aprobarCierre(repartidorId))) {
       throw new ConflictException(
         'El repartidor no solicitó el cierre de jornada',
       );

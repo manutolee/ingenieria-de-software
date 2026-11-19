@@ -23,7 +23,10 @@ describe('Depósito y devoluciones (e2e)', () => {
   const cookieRepartidor = async (repartidorId: number) =>
     `access_token=${await jwt.signAsync({ sub: repartidorId, rol: 'REPARTIDOR' })}`;
 
-  async function crearRepartidor(nombre = 'Lucas') {
+  async function crearRepartidor(
+    nombre: string,
+    estado: 'ESPERANDO_VALIDACION_CIERRE' | 'DISPONIBLE',
+  ) {
     const rep = await prisma.repartidor.create({
       data: {
         nombre,
@@ -32,23 +35,21 @@ describe('Depósito y devoluciones (e2e)', () => {
         email: emailUnico(),
         direccion: 'Calle 1 100',
         vehiculo: 'MOTO',
-        estado: 'ESPERANDO_VALIDACION_CIERRE',
-        cierreSolicitado: true,
+        estado,
+        cierreSolicitado: estado === 'ESPERANDO_VALIDACION_CIERRE',
+        enColaDesde: estado === 'DISPONIBLE' ? new Date() : null,
       },
     });
     return rep.id;
   }
 
   let secuencia = 0;
-  async function crearPaqueteNoEntregado(
-    repartidorId: number,
-    comercio = comercioId,
-  ) {
-    const codigoSeguimiento = `DEP00000${++secuencia}`;
-    const envio = await prisma.envio.create({
+  // Paquete que el repartidor no pudo entregar y el operario marcó "A devolver" (HU 24).
+  async function crearPaqueteADevolver(repartidorId: number) {
+    return prisma.envio.create({
       data: {
-        codigoSeguimiento,
-        comercioId: comercio,
+        codigoSeguimiento: `DEP00000${++secuencia}`,
+        comercioId,
         origenDireccion: 'Calle 7 123',
         destinoDireccion: 'Calle 50 567',
         destinatarioNombre: 'Juan',
@@ -56,29 +57,41 @@ describe('Depósito y devoluciones (e2e)', () => {
         vehiculoRequerido: 'MOTO',
         requiereFoto: false,
         requiereDni: false,
-        estado: 'CANCELADO',
+        estado: 'A_DEVOLVER',
         repartidorId,
-        eventos: {
-          create: [
-            {
-              tipo: 'CAMBIO_ESTADO',
-              estadoNuevo: 'RETIRADO',
-              actorTipo: 'REPARTIDOR',
-              actorId: repartidorId,
-            },
-            {
-              tipo: 'CAMBIO_ESTADO',
-              estadoAnterior: 'RETIRADO',
-              estadoNuevo: 'CANCELADO',
-              actorTipo: 'OPERARIO',
-              actorId: operarioId,
-            },
-          ],
-        },
       },
     });
-    return envio;
   }
+
+  // Devuelven la respuesta ya resuelta (el body va como tercer/cuarto parámetro).
+  const comoOperario = async (
+    metodo: 'get' | 'post',
+    ruta: string,
+    body?: object,
+  ) => {
+    const pedido = request(app.getHttpServer())
+      [metodo](`/api/${ruta}`)
+      .set('Cookie', await cookieOperario());
+    return body ? pedido.send(body) : pedido;
+  };
+
+  const comoRepartidor = async (
+    repartidorId: number,
+    metodo: 'get' | 'post',
+    ruta: string,
+    body?: object,
+  ) => {
+    const pedido = request(app.getHttpServer())
+      [metodo](`/api/${ruta}`)
+      .set('Cookie', await cookieRepartidor(repartidorId));
+    return body ? pedido.send(body) : pedido;
+  };
+
+  const reingresar = (repartidorId: number, codigoSeguimiento: string) =>
+    comoOperario('post', 'envios/deposito/reingreso', {
+      repartidorId,
+      codigoSeguimiento,
+    });
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -118,61 +131,52 @@ describe('Depósito y devoluciones (e2e)', () => {
 
   afterAll(() => app.close());
 
-  it('HU37: registra el reingreso a En custodia, lo quita de la rendición del repartidor y figura en el historial con el nombre del operario', async () => {
-    const repartidorId = await crearRepartidor();
-    const otroRepartidorId = await crearRepartidor('Mateo');
-    const envio = await crearPaqueteNoEntregado(repartidorId);
-    const envioDeOtro = await crearPaqueteNoEntregado(otroRepartidorId);
+  it('HU 37: reingresa el paquete a custodia, lo saca de la rendición y lo deja en el historial', async () => {
+    const repartidorId = await crearRepartidor(
+      'Lucas',
+      'ESPERANDO_VALIDACION_CIERRE',
+    );
+    const otroId = await crearRepartidor(
+      'Mateo',
+      'ESPERANDO_VALIDACION_CIERRE',
+    );
+    const envio = await crearPaqueteADevolver(repartidorId);
+    const envioDeOtro = await crearPaqueteADevolver(otroId);
 
-    // Escenario 3: código inexistente
-    const inexistente = await request(app.getHttpServer())
-      .post('/api/envios/deposito/reingreso')
-      .set('Cookie', await cookieOperario())
-      .send({ repartidorId, codigoSeguimiento: 'NOEXISTE99' });
+    const inexistente = await reingresar(repartidorId, 'NOEXISTE00');
     expect(inexistente.status).toBe(404);
     expect(inexistente.body.message).toBe(
       'El código no corresponde a ningún envío',
     );
 
-    // Escenario 2: paquete de otro repartidor
-    const ajeno = await request(app.getHttpServer())
-      .post('/api/envios/deposito/reingreso')
-      .set('Cookie', await cookieOperario())
-      .send({
-        repartidorId,
-        codigoSeguimiento: envioDeOtro.codigoSeguimiento,
-      });
-    expect(ajeno.status).toBe(409);
-    expect(ajeno.body.message).toBe(
+    const deOtro = await reingresar(
+      repartidorId,
+      envioDeOtro.codigoSeguimiento,
+    );
+    expect(deOtro.status).toBe(409);
+    expect(deOtro.body.message).toBe(
       'El paquete no pertenece a la jornada de este repartidor',
     );
 
-    // Escenario 1: reingreso exitoso
-    const ok = await request(app.getHttpServer())
-      .post('/api/envios/deposito/reingreso')
-      .set('Cookie', await cookieOperario())
-      .send({ repartidorId, codigoSeguimiento: envio.codigoSeguimiento });
+    const ok = await reingresar(repartidorId, envio.codigoSeguimiento);
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({
-      envioId: envio.id,
       estado: 'EN_CUSTODIA',
       operarioNombre: 'Ana Pérez',
     });
 
-    // Verifica que se quitó de la rendición del repartidor
-    const rendicion = await request(app.getHttpServer())
-      .get(`/api/repartidores/${repartidorId}/rendicion`)
-      .set('Cookie', await cookieOperario());
+    const rendicion = await comoOperario(
+      'get',
+      `repartidores/${repartidorId}/rendicion`,
+    );
     expect(rendicion.body.paquetesADevolver).toEqual([]);
 
-    // Escenario 4: figura "En custodia" en el historial del envío con el nombre del operario
-    const detalle = await request(app.getHttpServer())
-      .get(`/api/envios/${envio.id}`)
-      .set('Cookie', await cookieOperario());
+    const detalle = await comoOperario('get', `envios/${envio.id}`);
+    expect(detalle.body.estado).toBe('EN_CUSTODIA');
     expect(detalle.body.historial).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          detalle: 'En custodia',
+          estadoNuevo: 'EN_CUSTODIA',
           actorTipo: 'OPERARIO',
           actorNombre: 'Ana Pérez',
         }),
@@ -180,69 +184,205 @@ describe('Depósito y devoluciones (e2e)', () => {
     );
   });
 
-  it('HU38, HU39 y HU40: activa alerta >= 24 h, genera orden de devolución quitando la alerta, y confirma devolución con foto bloqueando cancelación posterior', async () => {
-    const repartidorId = await crearRepartidor();
-    const envio = await crearPaqueteNoEntregado(repartidorId);
+  it('HU 38, 39, 40 y 41: la orden se ofrece por la cola, el repartidor la entrega con constancia y cuenta como devuelta', async () => {
+    const rindiendo = await crearRepartidor(
+      'Lucas',
+      'ESPERANDO_VALIDACION_CIERRE',
+    );
+    const a = await crearPaqueteADevolver(rindiendo);
+    const b = await crearPaqueteADevolver(rindiendo);
+    await reingresar(rindiendo, a.codigoSeguimiento).then((r) =>
+      expect(r.status).toBe(200),
+    );
+    await reingresar(rindiendo, b.codigoSeguimiento).then((r) =>
+      expect(r.status).toBe(200),
+    );
 
-    // Reingresa hace 25 horas (HU40 Escenario 1)
-    const hace25Horas = new Date(Date.now() - 25 * 60 * 60 * 1000);
-    await prisma.eventoEnvio.create({
-      data: {
-        envioId: envio.id,
-        tipo: 'DEVOLUCION',
-        detalle: 'En custodia',
-        actorTipo: 'OPERARIO',
-        actorId: operarioId,
-        creadoEn: hace25Horas,
-      },
+    // HU 40: con 25 horas en custodia aparece la alerta.
+    await prisma.eventoEnvio.updateMany({
+      where: { envioId: { in: [a.id, b.id] }, estadoNuevo: 'EN_CUSTODIA' },
+      data: { creadoEn: new Date(Date.now() - 25 * 3_600_000) },
     });
+    const alertas = await comoOperario('get', 'envios/deposito/alertas');
+    expect(alertas.body).toHaveLength(2);
 
-    const alertasAntes = await request(app.getHttpServer())
-      .get('/api/envios/deposito/alertas')
-      .set('Cookie', await cookieOperario());
-    expect(alertasAntes.status).toBe(200);
-    expect(alertasAntes.body).toEqual([
-      expect.objectContaining({
-        envioId: envio.id,
-        horasEnCustodia: 25,
-      }),
-    ]);
-
-    // HU38: Crear orden de devolución
-    const orden = await request(app.getHttpServer())
-      .post('/api/envios/deposito/ordenes-devolucion')
-      .set('Cookie', await cookieOperario())
-      .send({ comercioId, envioIds: [envio.id] });
+    // HU 38: la orden con los dos paquetes se ofrece al repartidor disponible.
+    const repartidorId = await crearRepartidor('Sofía', 'DISPONIBLE');
+    const orden = await comoOperario(
+      'post',
+      'envios/deposito/ordenes-devolucion',
+      { comercioId, envioIds: [a.id, b.id] },
+    );
     expect(orden.status).toBe(201);
-    expect(orden.body.estado).toBe('EN_DEVOLUCION');
+    expect(orden.body).toMatchObject({ cantidadPaquetes: 2, ofrecida: true });
 
-    // HU40 Escenario 3: La alerta desaparece al incluir el paquete en una orden de devolución
-    const alertasDespues = await request(app.getHttpServer())
-      .get('/api/envios/deposito/alertas')
-      .set('Cookie', await cookieOperario());
-    expect(alertasDespues.body).toEqual([]);
+    // HU 40, escenario 3: ya no figuran en la alerta.
+    expect((await comoOperario('get', 'envios/deposito/alertas')).body).toEqual(
+      [],
+    );
+    // HU 38, escenario 2: no quedan paquetes en custodia.
+    const sinPaquetes = await comoOperario(
+      'get',
+      `envios/deposito/custodia?comercioId=${comercioId}`,
+    );
+    expect(sinPaquetes.body.message).toBe(
+      'No hay paquetes en custodia para este comercio',
+    );
 
-    // HU39 Escenario 2: Confirmar devolución sin foto falla con "Falta la foto de la constancia"
-    const sinFoto = await request(app.getHttpServer())
-      .post('/api/repartidor/viajes/actual/confirmar-devolucion')
-      .set('Cookie', await cookieRepartidor(repartidorId))
-      .send({});
+    const oferta = await comoRepartidor(
+      repartidorId,
+      'get',
+      'repartidor/ofertas/actual',
+    );
+    expect(oferta.body.oferta.envio).toMatchObject({
+      origenDireccion: 'Depósito (base)',
+      destinoDireccion: 'Calle 7 123',
+      observaciones: 'Devolución al comercio: 2 paquetes',
+    });
+    await comoRepartidor(
+      repartidorId,
+      'post',
+      `repartidor/ofertas/${oferta.body.oferta.id}/aceptar`,
+    ).then((r) => expect(r.status).toBe(200));
+
+    const viaje = await comoRepartidor(
+      repartidorId,
+      'get',
+      'repartidor/viajes/actual',
+    );
+    expect(viaje.body.viaje).toMatchObject({
+      esDevolucion: true,
+      estado: 'EN_DEVOLUCION',
+      paquetes: [a.codigoSeguimiento, b.codigoSeguimiento],
+    });
+    expect(
+      (
+        await prisma.repartidor.findUniqueOrThrow({
+          where: { id: repartidorId },
+        })
+      ).estado,
+    ).toBe('OCUPADO');
+
+    // HU 39, escenario 2: sin foto no confirma.
+    const sinFoto = await comoRepartidor(
+      repartidorId,
+      'post',
+      'repartidor/viajes/actual/confirmar-devolucion',
+      {},
+    );
     expect(sinFoto.status).toBe(400);
     expect(sinFoto.body.message).toBe('Falta la foto de la constancia');
 
-    // HU39 Escenario 1: Confirmar devolución con foto pasa a DEVUELTO_AL_COMERCIO
-    const conFoto = await request(app.getHttpServer())
-      .post('/api/repartidor/viajes/actual/confirmar-devolucion')
-      .set('Cookie', await cookieRepartidor(repartidorId))
-      .send({ foto: FOTO_VALIDA });
-    expect(conFoto.status).toBe(200);
-    expect(conFoto.body.estado).toBe('DEVUELTO_AL_COMERCIO');
+    const confirmada = await comoRepartidor(
+      repartidorId,
+      'post',
+      'repartidor/viajes/actual/confirmar-devolucion',
+      { foto: FOTO_VALIDA },
+    );
+    expect(confirmada.status).toBe(200);
+    expect(
+      await prisma.envio.findMany({
+        where: { id: { in: [a.id, b.id] } },
+        select: { estado: true },
+      }),
+    ).toEqual([
+      { estado: 'DEVUELTO_AL_COMERCIO' },
+      { estado: 'DEVUELTO_AL_COMERCIO' },
+    ]);
+    expect(
+      (
+        await prisma.repartidor.findUniqueOrThrow({
+          where: { id: repartidorId },
+        })
+      ).estado,
+    ).toBe('DISPONIBLE');
 
-    // HU39 Escenario 3: Intentar cancelar un envío devuelto muestra "El envío ya finalizó su ciclo"
-    const cancelarDevuelto = await request(app.getHttpServer())
-      .post(`/api/envios/${envio.id}/cancelar`)
-      .set('Cookie', await cookieOperario());
-    expect(cancelarDevuelto.status).toBe(409);
-    expect(cancelarDevuelto.body.message).toBe('El envío ya finalizó su ciclo');
+    // HU 39, escenario 3: un envío devuelto no se cancela.
+    const cancelar = await comoOperario('post', `envios/${a.id}/cancelar`);
+    expect(cancelar.status).toBe(409);
+    expect(cancelar.body.message).toBe('El envío ya finalizó su ciclo');
+
+    // HU 41: el resumen del día cuenta los devueltos.
+    const hoy = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Argentina/Buenos_Aires',
+    }).format(new Date());
+    const resumen = await comoOperario(
+      'get',
+      `comercios/${comercioId}/resumen?fecha=${hoy}`,
+    );
+    expect(resumen.body).toMatchObject({ devueltos: 2 });
+
+    // HU 4: los devueltos salen del panel.
+    const panel = await comoOperario('get', 'envios/panel');
+    expect(panel.body.total).toBe(0);
+  });
+
+  it('HU 22 y 38: una orden sin repartidor aparece en excepciones y se asigna a mano', async () => {
+    const rindiendo = await crearRepartidor(
+      'Lucas',
+      'ESPERANDO_VALIDACION_CIERRE',
+    );
+    const paquete = await crearPaqueteADevolver(rindiendo);
+    await reingresar(rindiendo, paquete.codigoSeguimiento).then((r) =>
+      expect(r.status).toBe(200),
+    );
+
+    // Nadie en la cola: la orden queda esperando repartidor.
+    const orden = await comoOperario(
+      'post',
+      'envios/deposito/ordenes-devolucion',
+      {
+        comercioId,
+        envioIds: [paquete.id],
+      },
+    );
+    expect(orden.body).toMatchObject({ ofrecida: false });
+
+    const panel = await comoOperario('get', 'excepciones');
+    expect(panel.body.excepciones).toEqual([
+      expect.objectContaining({
+        envioId: paquete.id,
+        motivo: 'DEVOLUCION_SIN_REPARTIDOR',
+        destinoDireccion: 'Calle 7 123',
+        puedeAsignar: true,
+        puedeCancelar: false,
+      }),
+    ]);
+
+    const repartidorId = await crearRepartidor('Sofía', 'DISPONIBLE');
+    // El motor la reintentaría solo; acá se la asigna el operario antes.
+    await prisma.repartidor.update({
+      where: { id: repartidorId },
+      data: { estado: 'EN_PAUSA', enColaDesde: null },
+    });
+    const asignada = await comoOperario(
+      'post',
+      `excepciones/${paquete.id}/asignar`,
+      { repartidorId },
+    );
+    expect(asignada.status).toBe(200);
+
+    const oferta = await comoRepartidor(
+      repartidorId,
+      'get',
+      'repartidor/ofertas/actual',
+    );
+    await comoRepartidor(
+      repartidorId,
+      'post',
+      `repartidor/ofertas/${oferta.body.oferta.id}/aceptar`,
+    ).then((r) => expect(r.status).toBe(200));
+    const viaje = await comoRepartidor(
+      repartidorId,
+      'get',
+      'repartidor/viajes/actual',
+    );
+    expect(viaje.body.viaje).toMatchObject({
+      esDevolucion: true,
+      paquetes: [paquete.codigoSeguimiento],
+    });
+    expect((await comoOperario('get', 'excepciones')).body.excepciones).toEqual(
+      [],
+    );
   });
 });

@@ -53,9 +53,12 @@ export class ComerciosRepository {
   }
 
   // Pendientes o en viaje: todo lo que no está entregado ni cancelado.
-  async contarEnviosEnCurso(comercioId: number) {
+  async contarEnviosEnCurso(
+    comercioId: number,
+    estadosFinales: readonly EstadoEnvio[],
+  ) {
     return this.prisma.envio.count({
-      where: { comercioId, estado: { notIn: ['ENTREGADO', 'CANCELADO'] } },
+      where: { comercioId, estado: { notIn: [...estadosFinales] } },
     });
   }
 

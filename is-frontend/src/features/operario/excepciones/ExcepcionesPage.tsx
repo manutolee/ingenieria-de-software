@@ -22,6 +22,7 @@ type Excepcion = {
   vehiculoRequerido: TipoVehiculo
   estado: EstadoEnvio
   puedeAsignar: boolean
+  puedeCancelar: boolean
   aviso: string
   minutosEspera: number
 }
@@ -104,9 +105,11 @@ export function ExcepcionesPage() {
       celda: (e) => (
         <div className="flex gap-2">
           {e.puedeAsignar && <Boton onClick={() => setAsignando(e)}>Asignar</Boton>}
-          <Boton variante="peligro" onClick={() => setCancelando(e)}>
-            Cancelar envío
-          </Boton>
+          {e.puedeCancelar && (
+            <Boton variante="peligro" onClick={() => setCancelando(e)}>
+              Cancelar envío
+            </Boton>
+          )}
         </div>
       ),
     },

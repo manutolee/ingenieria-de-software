@@ -11,6 +11,9 @@ export type EstadoEnvio =
   | 'PARADO'
   | 'CON_NOVEDAD'
   | 'A_DEVOLVER'
+  | 'EN_CUSTODIA'
+  | 'EN_DEVOLUCION'
+  | 'DEVUELTO_AL_COMERCIO'
   | 'ENTREGADO'
   | 'CANCELADO'
 
@@ -24,6 +27,9 @@ export const ETIQUETA_ESTADO_ENVIO: Record<EstadoEnvio, string> = {
   PARADO: 'Parado',
   CON_NOVEDAD: 'Con novedad',
   A_DEVOLVER: 'A devolver',
+  EN_CUSTODIA: 'En custodia',
+  EN_DEVOLUCION: 'En devolución',
+  DEVUELTO_AL_COMERCIO: 'Devuelto al comercio',
   ENTREGADO: 'Entregado',
   CANCELADO: 'Cancelado',
 }

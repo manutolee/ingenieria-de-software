@@ -19,8 +19,11 @@ import {
 import { AsignacionService } from '../asignacion/asignacion.service';
 import { ComerciosService } from '../comercios/comercios.service';
 import { generarCodigoSeguimiento } from './codigo-seguimiento.util';
-import { esEnvioDevueltoAlComercio } from './domain/deposito';
-import { ESTADOS_FINALES, esTransicionValida } from './domain/estado-envio';
+import {
+  ESTADOS_CON_PAQUETE_RETIRADO,
+  ESTADOS_FINALES,
+  esTransicionValida,
+} from './domain/estado-envio';
 import { armarHistorial } from './domain/historial';
 import { ActualizarEnvioDto } from './dto/actualizar-envio.dto';
 import { CrearEnvioDto } from './dto/crear-envio.dto';
@@ -208,13 +211,16 @@ export class EnviosService {
       throw new NotFoundException('El envío no existe');
     }
 
-    // HU39 (Escenario 3): Un envío "Devuelto al comercio" ya está en un estado final y no
-    // puede cancelarse. Se verifica antes que el resto para devolver el mensaje exacto de la HU.
-    if (esEnvioDevueltoAlComercio(envio.estado, envio.eventos ?? [])) {
+    // HU 39 (escenario 3): devuelto al comercio es un estado final.
+    if (envio.estado === 'DEVUELTO_AL_COMERCIO') {
       throw new ConflictException('El envío ya finalizó su ciclo');
     }
 
-    if (envio.estado === 'RETIRADO' || envio.estado === 'EN_DOMICILIO') {
+    // HU 30: con el paquete fuera del comercio ya no se cancela; se gestiona como devolución.
+    if (
+      ESTADOS_CON_PAQUETE_RETIRADO.includes(envio.estado) ||
+      (envio.estado !== 'CANCELADO' && envio._count.eventos > 0)
+    ) {
       throw new ConflictException(
         'No se puede cancelar: el paquete ya fue retirado',
       );
@@ -272,6 +278,11 @@ export class EnviosService {
       dto,
       operarioId,
     );
+    if (resultado === 'REPARTIDOR_NO_DISPONIBLE') {
+      throw new ConflictException(
+        'El repartidor que tiene el paquete no está disponible (en pausa, en emergencia o cerrando la jornada). Marcá el envío para devolución o esperá a que vuelva.',
+      );
+    }
     if (!resultado) {
       throw new ConflictException(
         'El envío o el repartidor cambió de estado. Actualizá el detalle e intentá nuevamente.',

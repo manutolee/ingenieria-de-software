@@ -5,7 +5,9 @@ import { BotonGrande, Mapa, type Coordenadas, type PuntoMapa } from '../../../sh
 import { usePolling } from '../../../shared/usePolling.ts'
 
 // Lo que devuelve GET /api/repartidor/viajes/actual (E-2).
-type EstadoViaje = 'ASIGNADO' | 'EN_CAMINO_A_RETIRAR' | 'RETIRADO' | 'EN_DOMICILIO'
+type EstadoEntrega = 'ASIGNADO' | 'EN_CAMINO_A_RETIRAR' | 'RETIRADO' | 'EN_DOMICILIO'
+// EN_DEVOLUCION: el repartidor lleva una orden de devolución del depósito al comercio (HU 39).
+type EstadoViaje = EstadoEntrega | 'EN_DEVOLUCION'
 type MotivoNovedad = 'CLIENTE_AUSENTE' | 'DIRECCION_INCORRECTA' | 'DEMORADO'
 
 type Viaje = {
@@ -14,6 +16,8 @@ type Viaje = {
   estado: EstadoViaje
   siguienteEstado: EstadoEnvio | null
   esDevolucion?: boolean
+  // Códigos de los paquetes de la orden de devolución (solo si esDevolucion).
+  paquetes?: string[]
   comercio: { nombre: string; telefono: string }
   origenDireccion: string
   destinoDireccion: string
@@ -79,7 +83,7 @@ async function comprimirFoto(archivo: File): Promise<string> {
 
 // Texto del botón según el estado ACTUAL: describe lo que el repartidor acaba de hacer
 // (o va a hacer), que es justo lo que pasa el envío al estado siguiente.
-const PASO: Record<EstadoViaje, { numero: number; accion: string }> = {
+const PASO: Record<EstadoEntrega, { numero: number; accion: string }> = {
   ASIGNADO: { numero: 1, accion: 'Voy al comercio' },
   EN_CAMINO_A_RETIRAR: { numero: 2, accion: 'Paquete retirado' },
   RETIRADO: { numero: 3, accion: 'Llegué al domicilio' },
@@ -120,12 +124,14 @@ function EvidenciaEntrega({
   alCambiarDni,
   foto,
   alCambiarFoto,
+  tituloFoto = 'Foto del paquete entregado (obligatoria)',
 }: {
   viaje: Viaje
   dni: string
   alCambiarDni: (dni: string) => void
   foto: string
   alCambiarFoto: (foto: string) => void
+  tituloFoto?: string
 }) {
   const [errorFoto, setErrorFoto] = useState<string | null>(null)
 
@@ -167,7 +173,7 @@ function EvidenciaEntrega({
       {viaje.requiereFoto && (
         <div className="space-y-3">
           <p className="text-lg font-semibold text-yellow-200">
-            📷 Foto del paquete entregado (obligatoria)
+            📷 {tituloFoto}
           </p>
           {foto ? (
             <div className="space-y-3">
@@ -270,7 +276,22 @@ function MapaDelViaje({ viaje, enRetiro }: { viaje: Viaje; enRetiro: boolean }) 
   )
 }
 
-export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
+// Qué le queda al repartidor después de terminar un viaje: no siempre vuelve a la cola
+// (puede tener un reintento asignado o el cierre de jornada pendiente).
+async function mensajeAlTerminar(hecho: string): Promise<string> {
+  try {
+    const { estado } = await api<{ estado: string }>('/repartidor/jornada')
+    if (estado === 'OCUPADO') return `${hecho} Tenés otro viaje asignado.`
+    if (estado === 'ESPERANDO_VALIDACION_CIERRE')
+      return `${hecho} Tu cierre de jornada quedó esperando la aprobación del operario.`
+  } catch {
+    // Sin la jornada no se sabe qué sigue: alcanza con confirmar lo hecho.
+    return hecho
+  }
+  return `${hecho} Ya estás de nuevo en la cola.`
+}
+
+export function ViajeActual({ alTerminar }: { alTerminar: (mensaje: string) => void }) {
   // undefined = todavía cargando; null = no hay viaje activo.
   const [viaje, setViaje] = useState<Viaje | null | undefined>(undefined)
   const [confirmando, setConfirmando] = useState(false)
@@ -321,7 +342,7 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
       if (respuesta.estado === 'ENTREGADO') {
         setDni('')
         setFoto('')
-        alEntregar()
+        alTerminar(await mensajeAlTerminar('¡Entrega registrada!'))
         return
       }
       await consultar()
@@ -355,7 +376,7 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
         datos: { foto },
       })
       setFoto('')
-      alEntregar()
+      alTerminar(await mensajeAlTerminar('¡Devolución registrada!'))
     } catch (error) {
       setAviso(
         error instanceof ErrorApi && (error.status === 400 || error.status === 409)
@@ -436,6 +457,57 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
         )}
         {aviso && <p className="rounded-xl bg-slate-800 p-4">{aviso}</p>}
         <p className="text-center text-lg text-slate-300">No tenés viajes asignados en este momento.</p>
+      </section>
+    )
+  }
+
+  // HU 39: la devolución tiene su propia pantalla, sin los pasos de una entrega.
+  if (viaje.esDevolucion || viaje.estado === 'EN_DEVOLUCION') {
+    const cantidad = viaje.paquetes?.length ?? 0
+    return (
+      <section className="space-y-5 rounded-2xl border-4 border-yellow-400 bg-slate-900 p-5" aria-live="polite">
+        <h2 className="text-2xl font-bold">Devolvé los paquetes al comercio</h2>
+        <dl className="space-y-3">
+          <Dato titulo="Llevar a" grande>
+            {viaje.destinoDireccion}
+          </Dato>
+          <Dato titulo="Comercio">{viaje.comercio.nombre}</Dato>
+          {viaje.comercio.telefono && (
+            <Dato titulo="Teléfono del comercio">
+              <Telefono numero={viaje.comercio.telefono} />
+            </Dato>
+          )}
+          <Dato titulo={cantidad === 1 ? 'Paquete' : `Paquetes (${cantidad})`}>
+            <span className="font-mono">{viaje.paquetes?.join(', ')}</span>
+          </Dato>
+        </dl>
+        <a
+          href={linkNavegacion(null, viaje.destinoDireccion)}
+          target="_blank"
+          rel="noreferrer"
+          className="flex min-h-16 w-full items-center justify-center rounded-2xl bg-white px-6 text-xl font-bold text-black active:bg-gray-200"
+        >
+          Cómo llegar al comercio
+        </a>
+        <EvidenciaEntrega
+          viaje={{ ...viaje, requiereFoto: true, requiereDni: false }}
+          dni=""
+          alCambiarDni={() => undefined}
+          foto={foto}
+          alCambiarFoto={(nuevaFoto) => {
+            setFoto(nuevaFoto)
+            setAviso(null)
+          }}
+          tituloFoto="Foto de la constancia de recepción del comercio (obligatoria)"
+        />
+        {aviso && (
+          <p role="alert" className="rounded-xl bg-slate-800 p-4 font-semibold text-amber-300">
+            {aviso}
+          </p>
+        )}
+        <BotonGrande onClick={() => void confirmarDevolucion()} disabled={enviando}>
+          {enviando ? 'Confirmando…' : 'Confirmar devolución'}
+        </BotonGrande>
       </section>
     )
   }
@@ -526,23 +598,7 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
 
       {aviso && <p role="alert" className="rounded-xl bg-slate-800 p-4 font-semibold text-amber-300">{aviso}</p>}
 
-      {viaje.esDevolucion ? (
-        <div className="space-y-4">
-          <EvidenciaEntrega
-            viaje={{ ...viaje, requiereFoto: true, requiereDni: false }}
-            dni=""
-            alCambiarDni={() => undefined}
-            foto={foto}
-            alCambiarFoto={(nuevaFoto) => {
-              setFoto(nuevaFoto)
-              setAviso(null)
-            }}
-          />
-          <BotonGrande onClick={() => void confirmarDevolucion()} disabled={enviando}>
-            {enviando ? 'Confirmando…' : 'Confirmar devolución'}
-          </BotonGrande>
-        </div>
-      ) : confirmandoNovedad ? (
+      {confirmandoNovedad ? (
         <div className="space-y-3 rounded-xl border border-orange-400/50 p-4">
           <p className="text-center text-lg font-semibold">¿Qué pasó en el domicilio?</p>
           <label className="block space-y-2">

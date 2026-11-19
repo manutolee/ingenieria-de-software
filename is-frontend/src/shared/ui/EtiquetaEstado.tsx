@@ -10,6 +10,9 @@ const COLORES: Record<EstadoEnvio, string> = {
   PARADO: 'bg-orange-100 text-orange-800',
   CON_NOVEDAD: 'bg-rose-100 text-rose-800',
   A_DEVOLVER: 'bg-purple-100 text-purple-800',
+  EN_CUSTODIA: 'bg-fuchsia-100 text-fuchsia-800',
+  EN_DEVOLUCION: 'bg-teal-100 text-teal-800',
+  DEVUELTO_AL_COMERCIO: 'bg-emerald-100 text-emerald-800',
   ENTREGADO: 'bg-green-100 text-green-800',
   CANCELADO: 'bg-gray-200 text-gray-700',
 }
