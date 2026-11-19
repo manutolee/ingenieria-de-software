@@ -32,6 +32,11 @@ import { ReintentarEnvioDto } from './dto/reintentar-envio.dto';
 import { EnviosRepository } from './envios.repository';
 
 // Vehículo MÍNIMO según el tamaño (supuesto 8): el motor después acepta uno más grande.
+const ESTADOS_DEL_DEPOSITO: readonly EstadoEnvio[] = [
+  'EN_CUSTODIA',
+  'EN_DEVOLUCION',
+];
+
 const VEHICULO_MINIMO: Record<TamanioPaquete, TipoVehiculo> = {
   CHICO: 'MOTO',
   MEDIANO: 'AUTO',
@@ -213,12 +218,15 @@ export class EnviosService {
   // Panel del día (HU4): un grupo por cada estado no final, en el orden del enum y con su
   // cantidad. Los grupos salen del enum (no de una lista fija) para que un estado nuevo
   // aparezca solo. Cada envío viaja una única vez, dentro de su grupo.
+  // Los paquetes del depósito (en custodia o en una orden de devolución) no son parte de la
+  // operación del día: se siguen en la pestaña Depósito.
   async obtenerPanel() {
+    const fueraDelPanel = [...ESTADOS_FINALES, ...ESTADOS_DEL_DEPOSITO];
     const envios =
-      await this.enviosRepository.obtenerPanelEnvios(ESTADOS_FINALES);
+      await this.enviosRepository.obtenerPanelEnvios(fueraDelPanel);
 
     const grupos = Object.values(EstadoEnvio)
-      .filter((estado) => !ESTADOS_FINALES.includes(estado))
+      .filter((estado) => !fueraDelPanel.includes(estado))
       .map((estado) => {
         const delEstado = envios.filter((envio) => envio.estado === estado);
         return { estado, cantidad: delEstado.length, envios: delEstado };
@@ -276,11 +284,7 @@ export class EnviosService {
     return cancelado;
   }
 
-  async reintentar(
-    id: number,
-    dto: ReintentarEnvioDto,
-    operarioId: number,
-  ) {
+  async reintentar(id: number, dto: ReintentarEnvioDto, operarioId: number) {
     const envio = await this.enviosRepository.obtenerEstado(id);
     if (!envio) {
       throw new NotFoundException('El envío no existe');
@@ -324,9 +328,7 @@ export class EnviosService {
       throw new NotFoundException('El envío no existe');
     }
     if (envio.estado !== 'CON_NOVEDAD') {
-      throw new ConflictException(
-        'Solo se pueden devolver envíos con novedad',
-      );
+      throw new ConflictException('Solo se pueden devolver envíos con novedad');
     }
     if (!esTransicionValida(envio.estado, 'A_DEVOLVER', 'OPERARIO')) {
       throw new ConflictException('No se puede devolver este envío');

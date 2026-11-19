@@ -178,8 +178,6 @@ describe('Panel de envíos del día - HU #4 (e2e)', () => {
         { estado: 'PARADO', cantidad: 0 },
         { estado: 'CON_NOVEDAD', cantidad: 0 },
         { estado: 'A_DEVOLVER', cantidad: 0 },
-        { estado: 'EN_CUSTODIA', cantidad: 0 },
-        { estado: 'EN_DEVOLUCION', cantidad: 0 },
       ]);
       expect(grupoDe(panel, 'PENDIENTE').envios).toHaveLength(3);
       expect(grupoDe(panel, 'EN_CAMINO_A_RETIRAR').envios).toHaveLength(2);
