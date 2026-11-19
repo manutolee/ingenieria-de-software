@@ -32,10 +32,18 @@ interface PanelEnviosRespuesta {
   grupos: GrupoPanel[]
 }
 
-// Estados cuyos envíos se muestran destacados (HU4). Todavía no existen en el backend: los
-// agregan otras historias. Por eso van como texto y no como EstadoEnvio. Cuando el panel
-// empiece a recibirlos, la columna y sus tarjetas se destacan sin tocar nada más.
-const ESTADOS_DESTACADOS: readonly string[] = ['CON_NOVEDAD', 'INTERRUMPIDO']
+// Estados que piden atención del operario: sus columnas y tarjetas se destacan (HU 4).
+const ESTADOS_DESTACADOS: readonly EstadoEnvio[] = ['CON_NOVEDAD', 'INTERRUMPIDO', 'PARADO']
+
+// El recorrido normal siempre se ve; las columnas de excepciones y devoluciones solo cuando
+// tienen envíos, para que el panel no se llene de columnas vacías.
+const ESTADOS_SIEMPRE_VISIBLES: readonly EstadoEnvio[] = [
+  'PENDIENTE',
+  'ASIGNADO',
+  'EN_CAMINO_A_RETIRAR',
+  'RETIRADO',
+  'EN_DOMICILIO',
+]
 
 interface EstiloColumna {
   bordeColor: string
@@ -178,7 +186,9 @@ export function PanelEnviosPage() {
       {/* Agrupaciones y columnas operativas */}
       {totalActivos > 0 && (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
-          {datosPanel.grupos.map((grupo) => {
+          {datosPanel.grupos
+            .filter((grupo) => grupo.cantidad > 0 || ESTADOS_SIEMPRE_VISIBLES.includes(grupo.estado))
+            .map((grupo) => {
             const lista = grupo.envios
             // El destacado depende solo del estado del envío, nunca de sus eventos.
             const destacado = ESTADOS_DESTACADOS.includes(grupo.estado)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ErrorApi } from '../../../shared/api.ts'
-import { Boton, Campo, Modal } from '../../../shared/ui/index.ts'
+import { Boton, Modal } from '../../../shared/ui/index.ts'
 import { FormularioReingresoDeposito } from '../envios/DepositoDevolucionesSeccion.tsx'
 import type { Repartidor } from './tipos.ts'
 
@@ -18,8 +18,9 @@ type PaqueteADevolver = {
   motivo: string
 }
 
-// G-1: los paquetes a devolver los calcula el sistema; el operario indica cuántos recibió
-// en la base y el backend valida que coincidan.
+// G-1 / HU 36-37: los paquetes a devolver los calcula el sistema. El operario registra el
+// reingreso de cada uno con su código (pasa a "En custodia" y sale de la lista) y recién
+// con la lista vacía el backend aprueba el cierre.
 function AprobarCierreContenido({
   repartidor,
   onCerrar,
@@ -30,7 +31,6 @@ function AprobarCierreContenido({
   onAprobado: () => void
 }) {
   const [paquetes, setPaquetes] = useState<PaqueteADevolver[] | null>(null)
-  const [paquetesDevueltos, setPaquetesDevueltos] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [enviando, setEnviando] = useState(false)
 
@@ -52,10 +52,7 @@ function AprobarCierreContenido({
     setEnviando(true)
     setError(null)
     try {
-      await api(`/repartidores/${repartidor.id}/aprobar-cierre`, {
-        metodo: 'POST',
-        datos: { paquetesDevueltos },
-      })
+      await api(`/repartidores/${repartidor.id}/aprobar-cierre`, { metodo: 'POST' })
       onAprobado()
       onCerrar()
     } catch (err) {
@@ -101,21 +98,13 @@ function AprobarCierreContenido({
               </li>
             ))}
           </ul>
-          <Campo
-            etiqueta="Paquetes recibidos en la base"
-            type="number"
-            min="0"
-            value={paquetesDevueltos}
-            onChange={(e) => setPaquetesDevueltos(Math.max(0, parseInt(e.target.value) || 0))}
-          />
         </div>
       )}
 
-      {/* HU37: Registrar el reingreso individual de cada paquete al depósito ("En custodia") */}
-      <FormularioReingresoDeposito
-        repartidorId={repartidor.id}
-        alReingresar={cargarRendicion}
-      />
+      {/* HU 37: cada paquete que entrega el repartidor se registra con su código. */}
+      {paquetes !== null && paquetes.length > 0 && (
+        <FormularioReingresoDeposito repartidorId={repartidor.id} alReingresar={cargarRendicion} />
+      )}
 
       <div className="flex justify-end gap-3 pt-2">
         <Boton variante="secundario" onClick={onCerrar} disabled={enviando}>
