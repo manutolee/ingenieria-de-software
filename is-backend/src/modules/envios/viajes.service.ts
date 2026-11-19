@@ -75,7 +75,13 @@ export class ViajesService {
           },
         };
       }
-      return { viaje: null };
+      const avisoCancelacion =
+        await this.enviosRepository.buscarAvisoCancelacionPorRepartidor(
+          repartidorId,
+        );
+      return avisoCancelacion
+        ? { viaje: null, avisoCancelacion }
+        : { viaje: null };
     }
 
     // Si el operario cambió la dirección con el viaje en curso (HU 31), se le avisa.

@@ -330,12 +330,24 @@ describe('EnviosService', () => {
       expect(asignacion.reintentarPendientes).toHaveBeenCalled();
     });
 
-    it.each(['ASIGNADO', 'EN_CAMINO_A_RETIRAR', 'RETIRADO', 'EN_DOMICILIO'])(
+    it.each(['PENDIENTE', 'ASIGNADO', 'EN_CAMINO_A_RETIRAR'])(
       'permite cancelar un envío en estado %s',
       async (estado) => {
         repository.obtenerEstado.mockResolvedValue({ id: 5, estado });
         repository.cancelar.mockResolvedValue({ id: 5, estado: 'CANCELADO' });
         await expect(service.cancelar(5, 12)).resolves.toBeDefined();
+      },
+    );
+
+    it.each(['RETIRADO', 'EN_DOMICILIO'])(
+      'rechaza cancelar en %s con el mensaje de devolución',
+      async (estado) => {
+        repository.obtenerEstado.mockResolvedValue({ id: 5, estado });
+
+        await expect(service.cancelar(5, 12)).rejects.toThrow(
+          'No se puede cancelar: el paquete ya fue retirado',
+        );
+        expect(repository.cancelar).not.toHaveBeenCalled();
       },
     );
 
@@ -368,7 +380,7 @@ describe('EnviosService', () => {
     });
 
     it('si el estado cambió mientras se cancelaba, da 409', async () => {
-      repository.obtenerEstado.mockResolvedValue({ id: 5, estado: 'RETIRADO' });
+      repository.obtenerEstado.mockResolvedValue({ id: 5, estado: 'ASIGNADO' });
       repository.cancelar.mockResolvedValue(null);
       await expect(service.cancelar(5, 12)).rejects.toBeInstanceOf(
         ConflictException,

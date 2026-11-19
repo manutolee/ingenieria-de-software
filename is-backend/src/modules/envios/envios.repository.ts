@@ -9,6 +9,7 @@ import type {
   TipoVehiculo,
 } from '../../generated/prisma/client';
 import type { NombresActores } from './domain/historial';
+import { AVISO_CANCELACION_REPARTIDOR } from './domain/cancelacion';
 import {
   ETIQUETA_MOTIVO_NOVEDAD,
   ReportarNovedadDto,
@@ -499,6 +500,38 @@ export class EnviosRepository {
     });
   }
 
+  async buscarAvisoCancelacionPorRepartidor(
+    repartidorId: number,
+  ): Promise<string | null> {
+    const envio = await this.prisma.envio.findFirst({
+      where: {
+        repartidorId,
+        estado: 'CANCELADO',
+        eventos: {
+          some: {
+            tipo: 'CAMBIO_ESTADO',
+            estadoNuevo: 'CANCELADO',
+            detalle: AVISO_CANCELACION_REPARTIDOR,
+          },
+        },
+      },
+      orderBy: [{ actualizadoEn: 'desc' }, { id: 'desc' }],
+      select: {
+        eventos: {
+          where: {
+            tipo: 'CAMBIO_ESTADO',
+            estadoNuevo: 'CANCELADO',
+            detalle: AVISO_CANCELACION_REPARTIDOR,
+          },
+          orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: { detalle: true },
+        },
+      },
+    });
+    return envio?.eventos[0]?.detalle ?? null;
+  }
+
   // Historial del día del repartidor (HU 34): solo envíos ENTREGADOS cuya entrega fue desde `desde`.
   // La hora de entrega sale del evento que pasó el envío a ENTREGADO.
   async listarEntregadosDelRepartidorDesde(repartidorId: number, desde: Date) {
@@ -875,6 +908,7 @@ export class EnviosRepository {
           tipo: 'CAMBIO_ESTADO',
           estadoAnterior,
           estadoNuevo: 'CANCELADO',
+          detalle: AVISO_CANCELACION_REPARTIDOR,
           actorTipo: 'OPERARIO',
           actorId: operarioId,
         },

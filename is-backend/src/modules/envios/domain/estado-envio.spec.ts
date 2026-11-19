@@ -24,8 +24,6 @@ describe('Máquina de estados del envío', () => {
       ['PENDIENTE', 'CANCELADO', 'OPERARIO'],
       ['ASIGNADO', 'CANCELADO', 'OPERARIO'],
       ['EN_CAMINO_A_RETIRAR', 'CANCELADO', 'OPERARIO'],
-      ['RETIRADO', 'CANCELADO', 'OPERARIO'],
-      ['EN_DOMICILIO', 'CANCELADO', 'OPERARIO'],
     ])('%s → %s por %s', (actual, destino, actor) => {
       expect(esTransicionValida(actual, destino, actor)).toBe(true);
     });
@@ -77,6 +75,37 @@ describe('Máquina de estados del envío', () => {
       [
         'no se cancela un envío entregado',
         'ENTREGADO',
+        'CANCELADO',
+        'OPERARIO',
+      ],
+      [
+        'no se cancela un paquete ya retirado',
+        'RETIRADO',
+        'CANCELADO',
+        'OPERARIO',
+      ],
+      [
+        'no se cancela un paquete en el domicilio',
+        'EN_DOMICILIO',
+        'CANCELADO',
+        'OPERARIO',
+      ],
+      [
+        'no se cancela un envío interrumpido',
+        'INTERRUMPIDO',
+        'CANCELADO',
+        'OPERARIO',
+      ],
+      ['no se cancela un envío parado', 'PARADO', 'CANCELADO', 'OPERARIO'],
+      [
+        'no se cancela un envío con novedad',
+        'CON_NOVEDAD',
+        'CANCELADO',
+        'OPERARIO',
+      ],
+      [
+        'no se cancela un envío a devolver',
+        'A_DEVOLVER',
         'CANCELADO',
         'OPERARIO',
       ],

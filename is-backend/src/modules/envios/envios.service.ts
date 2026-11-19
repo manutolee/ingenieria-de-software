@@ -214,11 +214,19 @@ export class EnviosService {
       throw new ConflictException('El envío ya finalizó su ciclo');
     }
 
+    if (envio.estado === 'RETIRADO' || envio.estado === 'EN_DOMICILIO') {
+      throw new ConflictException(
+        'No se puede cancelar: el paquete ya fue retirado',
+      );
+    }
+
     if (!esTransicionValida(envio.estado, 'CANCELADO', 'OPERARIO')) {
       throw new ConflictException(
         envio.estado === 'CANCELADO'
           ? 'El envío ya está cancelado'
-          : 'No se puede cancelar un envío entregado',
+          : envio.estado === 'ENTREGADO'
+            ? 'No se puede cancelar un envío entregado'
+            : 'No se puede cancelar el envío en su estado actual',
       );
     }
 

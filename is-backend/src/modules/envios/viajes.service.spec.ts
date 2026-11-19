@@ -7,6 +7,7 @@ import { ViajesService } from './viajes.service';
 describe('ViajesService', () => {
   const repository = {
     buscarViajeActivoPorRepartidor: jest.fn(),
+    buscarAvisoCancelacionPorRepartidor: jest.fn(),
     avanzarViaje: jest.fn(),
     listarEntregadosDelRepartidorDesde: jest.fn(),
     reportarIncidente: jest.fn(),
@@ -47,6 +48,18 @@ describe('ViajesService', () => {
     repository.buscarViajeActivoPorRepartidor.mockResolvedValue(null);
     await expect(service.obtenerViajeActual(1)).resolves.toEqual({
       viaje: null,
+    });
+  });
+
+  it('avisa al repartidor que no retire un envío cancelado', async () => {
+    repository.buscarViajeActivoPorRepartidor.mockResolvedValue(null);
+    repository.buscarAvisoCancelacionPorRepartidor.mockResolvedValue(
+      'El envío fue cancelado. No lo retires.',
+    );
+
+    await expect(service.obtenerViajeActual(1)).resolves.toEqual({
+      viaje: null,
+      avisoCancelacion: 'El envío fue cancelado. No lo retires.',
     });
   });
 
@@ -110,9 +123,9 @@ describe('ViajesService', () => {
     });
     asignacion.asignar.mockResolvedValue(null);
 
-    await expect(
-      service.reportarIncidente(1, {}),
-    ).resolves.toMatchObject({ estadoEnvio: 'PARADO' });
+    await expect(service.reportarIncidente(1, {})).resolves.toMatchObject({
+      estadoEnvio: 'PARADO',
+    });
     expect(repository.reportarIncidente).toHaveBeenCalledWith(1, undefined);
   });
 

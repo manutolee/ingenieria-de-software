@@ -147,15 +147,13 @@ describe('Cierre de jornada (e2e)', () => {
   });
 
   it('un paquete cancelado después del retiro se rinde en la base antes de aprobar el cierre', async () => {
-    const repartidor = await crearRepartidor('OCUPADO');
+    const repartidor = await crearRepartidor('DISPONIBLE');
     const envio = await crearViaje(repartidor, 'RETIRADO');
+    await prisma.envio.update({
+      where: { id: envio },
+      data: { estado: 'CANCELADO' },
+    });
     await comoRepartidor(repartidor, 'post', 'jornada/solicitar-cierre');
-
-    // Le cancelan el viaje con el paquete encima: no vuelve a la cola, queda esperando.
-    await request(app.getHttpServer())
-      .post(`/api/envios/${envio}/cancelar`)
-      .set('Cookie', await cookieDe(operarioId, 'OPERARIO'))
-      .expect(200);
     expect(await estadoDe(repartidor)).toBe('ESPERANDO_VALIDACION_CIERRE');
 
     const jornada = await comoRepartidor(repartidor, 'get', 'jornada');
@@ -178,12 +176,12 @@ describe('Cierre de jornada (e2e)', () => {
   });
 
   it('un paquete ya rendido no vuelve a aparecer en el cierre de la jornada siguiente', async () => {
-    const repartidor = await crearRepartidor('OCUPADO');
+    const repartidor = await crearRepartidor('DISPONIBLE');
     const envio = await crearViaje(repartidor, 'RETIRADO');
-    await request(app.getHttpServer())
-      .post(`/api/envios/${envio}/cancelar`)
-      .set('Cookie', await cookieDe(operarioId, 'OPERARIO'))
-      .expect(200);
+    await prisma.envio.update({
+      where: { id: envio },
+      data: { estado: 'CANCELADO' },
+    });
     await comoRepartidor(repartidor, 'post', 'jornada/solicitar-cierre');
     await aprobar(repartidor, 1).then((r) => expect(r.status).toBe(200));
 

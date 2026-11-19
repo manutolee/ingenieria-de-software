@@ -278,6 +278,7 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
   const [confirmandoNovedad, setConfirmandoNovedad] = useState(false)
   const [enviando, setEnviando] = useState(false)
   const [aviso, setAviso] = useState<string | null>(null)
+  const [avisoCancelacion, setAvisoCancelacion] = useState<string | null>(null)
   const [ubicacionIncidente, setUbicacionIncidente] = useState('')
   const [motivoNovedad, setMotivoNovedad] = useState<MotivoNovedad>('CLIENTE_AUSENTE')
   const [comentarioNovedad, setComentarioNovedad] = useState('')
@@ -286,7 +287,10 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
   const envioDeLaEvidencia = useRef<number | null>(null)
 
   const consultar = useCallback(async () => {
-    const respuesta = await api<{ viaje: Viaje | null }>('/repartidor/viajes/actual')
+    const respuesta = await api<{
+      viaje: Viaje | null
+      avisoCancelacion?: string | null
+    }>('/repartidor/viajes/actual')
     // La evidencia cargada es de un envío en particular: si el viaje cambió (por ejemplo, lo
     // cancelaron y llegó otro), no puede quedar la foto o el DNI del anterior.
     const envioId = respuesta.viaje?.envioId ?? null
@@ -296,6 +300,7 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
       setFoto('')
     }
     setViaje(respuesta.viaje)
+    setAvisoCancelacion(respuesta.avisoCancelacion ?? null)
   }, [])
 
   // El operario puede cancelar el envío mientras tanto: se refresca como el resto de la app.
@@ -424,6 +429,11 @@ export function ViajeActual({ alEntregar }: { alEntregar: () => void }) {
   if (viaje === null) {
     return (
       <section className="space-y-3 rounded-2xl bg-slate-900 p-5">
+        {avisoCancelacion && (
+          <p role="alert" className="rounded-xl bg-amber-900 p-4 text-lg font-semibold text-amber-100">
+            {avisoCancelacion}
+          </p>
+        )}
         {aviso && <p className="rounded-xl bg-slate-800 p-4">{aviso}</p>}
         <p className="text-center text-lg text-slate-300">No tenés viajes asignados en este momento.</p>
       </section>
