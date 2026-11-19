@@ -13,13 +13,13 @@ declare
   envios jsonb := '[
     {"c":"Farmacia Plaza Moreno","t":"CHICO","dest":"Calle 50 567, 3° B","n":"Carlos","a":"Medina","dni":"25111222","final":"ENTREGADO","r":"Lucas",
      "previas":[{"r":"Mateo","res":"VENCIDA"},{"r":"Sofía","res":"RECHAZADA"}],"ev":"Evidencia: DNI verificado","obs":"Timbre 3B"},
-    {"c":"Librería del Bosque","t":"MEDIANO","dest":"Calle 60 300","n":"Laura","a":"Méndez","dni":"26222333","final":"ENTREGADO","r":"Valentina","ev":"Evidencia: foto enviada por WhatsApp"},
+    {"c":"Librería del Bosque","t":"MEDIANO","dest":"Calle 60 300","n":"Laura","a":"Méndez","dni":"26222333","final":"ENTREGADO","r":"Valentina","ev":"Evidencia: foto adjunta"},
     {"c":"Ferretería La Tuerca","t":"GRANDE","dest":"Calle 115 890","n":"Pablo","a":"Herrera","dni":"27333444","final":"ENTREGADO","r":"Juan",
-     "ev":"Evidencia: DNI verificado, foto enviada por WhatsApp","obs":"Entregar en el portón"},
+     "ev":"Evidencia: DNI verificado, foto adjunta","obs":"Entregar en el portón"},
     {"c":"Kiosco Don Pepe","t":"CHICO","dest":"Calle 10 960","n":"Marcos","a":"Suárez","dni":"28444555","final":"CANCELADO","r":"Sofía"},
     {"c":"Kiosco Don Pepe","t":"CHICO","dest":"Calle 19 540","n":"Nicolás","a":"Acosta","dni":"29555666","final":"ENTREGADO","r":"Sofía"},
     {"c":"Kiosco Don Pepe","t":"CHICO","dest":"Calle 6 1300","n":"Lucía","a":"Benítez","dni":"30666777","final":"ENTREGADO","r":"Lucas"},
-    {"c":"Librería del Bosque","t":"CHICO","dest":"Calle 44 980","n":"Julia","a":"Castro","dni":"31777888","final":"ENTREGADO","r":"Mateo","ev":"Evidencia: foto enviada por WhatsApp"},
+    {"c":"Librería del Bosque","t":"CHICO","dest":"Calle 44 980","n":"Julia","a":"Castro","dni":"31777888","final":"ENTREGADO","r":"Mateo","ev":"Evidencia: foto adjunta"},
     {"c":"Kiosco Don Pepe","t":"CHICO","dest":"Calle 1 220","n":"Ramiro","a":"Vega","dni":"32888999","final":"ENTREGADO","r":"Mateo"}
   ]';
   op_id int;
@@ -42,7 +42,7 @@ begin
     raise exception 'Falta pegar el PIN_SECRET de Render en la primera línea del bloque';
   end if;
 
-  truncate ofertas, eventos_envio, envios, refresh_tokens, repartidores, comercios, operarios restart identity cascade;
+  truncate ofertas, eventos_envio, envios, ordenes_devolucion, refresh_tokens, repartidores, comercios, operarios restart identity cascade;
 
   -- Operario: admin / admin1234 (hash argon2 de esa contraseña).
   insert into operarios (usuario, nombre, password_hash)
